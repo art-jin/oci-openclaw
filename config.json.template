@@ -1,0 +1,68 @@
+{
+  "compartment_id": "ocid1.compartment.oc1..your-compartment-id",
+  "endpoint": "https://inference.generativeai.us-chicago-1.oci.oraclecloud.com",
+  "model_aliases": {
+    "claude-haiku-4-5": "xai.grok-4-fast-non-reasoning",
+    "claude-3-5-sonnet": "xai.grok-4-fast-non-reasoning",
+    "claude-3-haiku": "xai.grok-4-fast-non-reasoning"
+  },
+  "model_definitions": {
+    "xai.grok-4-fast-non-reasoning": {
+      "ocid": "ocid1.generativeaimodel.oc1.us-chicago-1.your-model-ocid",
+      "max_tokens_key": "max_tokens",
+      "temperature": 0.7
+    },
+    "xai.grok-4-fast-reasoning": {
+      "ocid": "ocid1.generativeaimodel.oc1.us-chicago-1.your-model-ocid",
+      "max_tokens_key": "max_tokens",
+      "temperature": 0.7
+    },
+    "xai.grok-code-fast-1": {
+      "ocid": "ocid1.generativeaimodel.oc1.us-chicago-1.your-model-ocid",
+      "max_tokens_key": "max_tokens",
+      "temperature": 0.7
+    },
+    "openai.gpt-oss-20b": {
+      "ocid": "ocid1.generativeaimodel.oc1.us-chicago-1.your-model-ocid",
+      "max_tokens_key": "max_completion_tokens",
+      "temperature": 0.7
+    },
+    "openai.gpt-oss-120b": {
+      "ocid": "ocid1.generativeaimodel.oc1.us-chicago-1.your-model-ocid",
+      "max_tokens_key": "max_completion_tokens",
+      "temperature": 0.7
+    },
+    "openai.gpt-5": {
+      "ocid": "ocid1.generativeaimodel.oc1.us-chicago-1.your-model-ocid",
+      "max_tokens_key": "max_completion_tokens",
+      "temperature": 1.0
+    },
+    "cohere.command-r-plus": {
+        "ocid": "ocid1.generativeaimodel.oc1...",
+        "api_format": "cohere",
+        "max_tokens_key": "max_tokens",
+        "temperature": 0.7
+      },
+      "cohere.command-r": {
+        "ocid": "ocid1.generativeaimodel.oc1...",
+        "api_format": "cohere",
+        "max_tokens_key": "max_tokens",
+        "temperature": 0.7
+      }
+  },
+  "default_model": "openai.gpt-oss-20b",
+  "debug": false,
+  "debug_ui": {
+    "enabled": false,
+    "dump_dir": "debug_dumps",
+    "index_db": "debug_dumps/index.db",
+    "scan_interval_sec": 3,
+    "auth_mode": "bearer",
+    "max_detail_bytes": 2000000
+  },
+  "server": {
+    "host": "127.0.0.1",
+    "port": 8000,
+    "log_level": "warning"
+  }
+}

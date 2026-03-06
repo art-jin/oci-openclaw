@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: oci-anthropic-gateway
+  namespace: gateway-prod
+spec:
+  type: LoadBalancer
+  loadBalancerSourceRanges:
+    # Anthropic docker environment egress IP/CIDR
+    - 203.0.113.10/32
+    # Admin office/VPN IP/CIDR
+    - 198.51.100.0/24
+  selector:
+    app: oci-anthropic-gateway
+  ports:
+    - name: http
+      protocol: TCP
+      port: 8000
+      targetPort: 8000
+
