@@ -41,8 +41,6 @@ set +a
 : "${OCI_COMPARTMENT_OCID:?OCI_COMPARTMENT_OCID is required}"
 : "${DEBUG_UI_AUTH_TOKEN:?DEBUG_UI_AUTH_TOKEN is required}"
 : "${GATEWAY_CONFIG_JSON_FILE:?GATEWAY_CONFIG_JSON_FILE is required}"
-: "${OCI_CONFIG_FILE:?OCI_CONFIG_FILE is required}"
-: "${OCI_KEY_FILE:?OCI_KEY_FILE is required}"
 
 K8S_NAMESPACE="${K8S_GATEWAY_NAMESPACE:-${K8S_NAMESPACE:-gateway-prod}}"
 OPENCLAW_NAMESPACE="${K8S_OPENCLAW_NAMESPACE:-openclaw-prod}"
@@ -241,8 +239,6 @@ echo "[INFO] Purpose: deploy gateway to OKE namespace ${K8S_NAMESPACE} from depl
 
 ensure_file_exists "$GATEWAY_CONFIG_JSON_FILE"
 validate_gateway_config_json "$GATEWAY_CONFIG_JSON_FILE"
-ensure_file_exists "$OCI_CONFIG_FILE"
-ensure_file_exists "$OCI_KEY_FILE"
 ensure_file_exists "$NAMESPACE_MANIFEST"
 ensure_file_exists "$DEPLOYMENT_MANIFEST"
 ensure_file_exists "$SERVICE_MANIFEST"
@@ -287,10 +283,6 @@ run_cmd "kubectl --kubeconfig \"$KUBECONFIG_PATH\" -n \"$K8S_NAMESPACE\" create 
   --from-literal=DEBUG_UI_AUTH_TOKEN=\"$DEBUG_UI_AUTH_TOKEN\" \
   --dry-run=client -o yaml | kubectl --kubeconfig \"$KUBECONFIG_PATH\" apply -f -"
 
-run_cmd "kubectl --kubeconfig \"$KUBECONFIG_PATH\" -n \"$K8S_NAMESPACE\" create secret generic gateway-oci-sdk \
-  --from-file=config=\"$OCI_CONFIG_FILE\" \
-  --from-file=oci_api_key.pem=\"$OCI_KEY_FILE\" \
-  --dry-run=client -o yaml | kubectl --kubeconfig \"$KUBECONFIG_PATH\" apply -f -"
 
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
