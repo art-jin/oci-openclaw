@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "payload": {
+    "kind": "update",
+    "status": "skipped",
+    "ts": 1772862974812,
+    "sessionKey": "agent:main:main",
+    "deliveryContext": {
+      "channel": "webchat"
+    },
+    "message": null,
+    "doctorHint": "Run: openclaw doctor --non-interactive",
+    "stats": {
+      "mode": "unknown",
+      "root": "/app",
+      "before": {
+        "version": "2026.2.27"
+      },
+      "after": null,
+      "steps": [],
+      "reason": "not-git-install",
+      "durationMs": 211
+    }
+  }
+}
