@@ -23,7 +23,7 @@
 
 ## 2. 架构
 
-### 2.1 文字说明
+### 2.1 OKE 架构到文字说明
 - 用户访问 openclaw。
 - openclaw 调用 gateway（集群内 DNS）。
 - gateway 调 OCI GenAI。
@@ -56,6 +56,35 @@ User Request ---------->|  Namespace: openclaw-prod   |
                         +-----------------------------+
 
 Admin ---> VPN/Bastion ---> /debug (Bearer Token Auth)
+```
+
+### 2.3 Local Docker 部署 文字图（ASCII）
+local-docker目录用于在本地 Docker Desktop 环境中部署 OpenClaw + OCI Anthropic Gateway。
+具体内容, 见local-docker目录下的说明文件。
+#### 架构
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    Docker Desktop (本地)                         │
+│                                                                 │
+│  ┌─────────────────┐         ┌─────────────────────────────┐   │
+│  │    OpenClaw     │  HTTP   │   OCI Anthropic Gateway     │   │
+│  │   Port: 18789   │ ──────► │   Port: 8000                │   │
+│  │                 │         │                             │   │
+│  │  baseUrl:       │         │   服务名: gateway           │   │
+│  │  http://gateway │         │   (或容器名: oci-anthropic- │   │
+│  │  :8000          │         │    gateway)                 │   │
+│  └─────────────────┘         └──────────────┬──────────────┘   │
+│                                             │                  │
+│                                             │ HTTPS 443        │
+│                                             ▼                  │
+│                                  ┌───────────────────────┐     │
+│                                  │    OCI GenAI          │     │
+│                                  │  (Oracle Cloud)       │     │
+│                                  └───────────────────────┘     │
+│                                                                 │
+│  网络: gateway-network (bridge)                                 │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
 ## 3. 执行过程
