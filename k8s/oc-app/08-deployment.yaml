@@ -1,0 +1,72 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: OC_APP
+  namespace: OC_APP_NS
+  labels:
+    app: OC_APP
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: OC_APP
+  template:
+    metadata:
+      labels:
+        app: OC_APP
+    spec:
+      containers:
+        - name: OC_APP
+          image: ghcr.io/oc-app/oc-app:replace-tag
+          imagePullPolicy: IfNotPresent
+          command:
+            - "node"
+            - "dist/index.js"
+            - "gateway"
+            - "--bind"
+            - "lan"
+            - "--port"
+            - "18987"
+            - "--token"
+            - "__OC_GATEWAY_TOKEN_ENV__"
+          ports:
+            - containerPort: 18987
+              name: gateway
+          env:
+            - name: HOME
+              value: /home/node
+            - name: TERM
+              value: xterm-256color
+            - name: OC_APP_GATEWAY_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: oc-app-gateway-auth
+                  key: OC_APP_GATEWAY_TOKEN
+          volumeMounts:
+            - name: oc-app-config
+              mountPath: /home/node/.oc-app/oc-app.json
+              subPath: oc-app.json
+              readOnly: true
+          livenessProbe:
+            tcpSocket:
+              port: 18987
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 3
+          readinessProbe:
+            tcpSocket:
+              port: 18987
+            initialDelaySeconds: 15
+            periodSeconds: 5
+            timeoutSeconds: 3
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+            limits:
+              cpu: "1"
+              memory: "1Gi"
+      volumes:
+        - name: oc-app-config
+          configMap:
+            name: oc-app-config

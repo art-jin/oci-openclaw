@@ -52,13 +52,11 @@ fi
 
 if [[ "$APPLY" -eq 1 ]]; then
   bash scripts/oci/01_prepare_oke_kubeconfig.sh "$ENV_FILE" --apply
-  bash scripts/oci/02_deploy_gateway_oke.sh --env "$ENV_FILE" --apply
-  bash scripts/oci/02_deploy_gateway_oke.sh --env "$ENV_FILE" --deploy-openclaw --apply
+  bash scripts/oci/02_deploy_gateway_oke.sh --env $ENV_FILE --deploy-oc-app --apply
   bash scripts/oci/03_verify_gateway.sh "$ENV_FILE"
 else
   bash scripts/oci/01_prepare_oke_kubeconfig.sh "$ENV_FILE"
-  bash scripts/oci/02_deploy_gateway_oke.sh --env "$ENV_FILE"
-  bash scripts/oci/02_deploy_gateway_oke.sh --env "$ENV_FILE" --deploy-openclaw
+  bash scripts/oci/02_deploy_gateway_oke.sh --env $ENV_FILE --deploy-oc-app
   bash scripts/oci/03_verify_gateway.sh "$ENV_FILE"
 fi
 

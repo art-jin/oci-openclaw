@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: OC_APP
+  namespace: OC_APP_NS
+spec:
+  type: ClusterIP
+  selector:
+    app: OC_APP
+  ports:
+    - name: http
+      protocol: TCP
+      port: 18789
+      targetPort: 18987

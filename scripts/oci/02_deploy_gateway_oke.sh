@@ -3,7 +3,7 @@ set -euo pipefail
 
 ENV_FILE="scripts/oci/gateway.env.example"
 APPLY=0
-DEPLOY_OPENCLAW=0
+DEPLOY_OC_APP=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -15,13 +15,13 @@ while [[ $# -gt 0 ]]; do
       APPLY=1
       shift
       ;;
-    --deploy-openclaw)
-      DEPLOY_OPENCLAW=1
+    --deploy-oc-app)
+      DEPLOY_OC_APP=1
       shift
       ;;
     *)
       echo "[ERROR] Unknown argument: $1" >&2
-      echo "Usage: $0 [--env path/to/gateway.env] [--apply] [--deploy-openclaw]" >&2
+      echo "Usage: $0 [--env path/to/gateway.env] [--apply] [--deploy-oc-app]" >&2
       exit 1
       ;;
   esac
@@ -42,8 +42,8 @@ set +a
 : "${DEBUG_UI_AUTH_TOKEN:?DEBUG_UI_AUTH_TOKEN is required}"
 : "${GATEWAY_CONFIG_JSON_FILE:?GATEWAY_CONFIG_JSON_FILE is required}"
 
-K8S_NAMESPACE="${K8S_GATEWAY_NAMESPACE:-${K8S_NAMESPACE:-gateway-prod}}"
-OPENCLAW_NAMESPACE="${K8S_OPENCLAW_NAMESPACE:-openclaw-prod}"
+K8S_GATEWAY_NAMESPACE="${K8S_GATEWAY_NAMESPACE:-${K8S_NAMESPACE:-gateway-prod}}"
+K8S_OC_APP_NAMESPACE="${K8S_OC_APP_NAMESPACE:-oc-app-prod}"
 KUBECONFIG_PATH="${KUBECONFIG_PATH:-$HOME/.kube/config}"
 
 GATEWAY_IMAGE_MODE="${GATEWAY_IMAGE_MODE:-prebuilt}"
@@ -55,16 +55,18 @@ SERVICE_MANIFEST="${SERVICE_MANIFEST:-k8s/05-service-internal-lb.yaml}"
 NETWORK_POLICY_EGRESS_MANIFEST="${NETWORK_POLICY_EGRESS_MANIFEST:-k8s/06-networkpolicy-egress-template.yaml}"
 NETWORK_POLICY_INGRESS_MANIFEST="${NETWORK_POLICY_INGRESS_MANIFEST:-}"
 
-OPENCLAW_MANIFEST_DIR="${OPENCLAW_MANIFEST_DIR:-}"
-OPENCLAW_DEPLOYMENT_NAME="${OPENCLAW_DEPLOYMENT_NAME:-openclaw}"
-OPENCLAW_GATEWAY_BASE_URL="${OPENCLAW_GATEWAY_BASE_URL:-http://oci-anthropic-gateway.${K8S_NAMESPACE}.svc.cluster.local:8000}"
-OPENCLAW_ENV_BASE_URL_KEY="${OPENCLAW_ENV_BASE_URL_KEY:-ANTHROPIC_BASE_URL}"
-OPENCLAW_ENV_API_KEY_KEY="${OPENCLAW_ENV_API_KEY_KEY:-ANTHROPIC_API_KEY}"
-OPENCLAW_GATEWAY_API_KEY="${OPENCLAW_GATEWAY_API_KEY:-}"
-OPENCLAW_PUBLIC_EXPOSE="${OPENCLAW_PUBLIC_EXPOSE:-1}"
-OPENCLAW_PUBLIC_SERVICE_NAME="${OPENCLAW_PUBLIC_SERVICE_NAME:-openclaw-public}"
-OPENCLAW_PUBLIC_SERVICE_PORT="${OPENCLAW_PUBLIC_SERVICE_PORT:-80}"
-OPENCLAW_PUBLIC_TARGET_PORT="${OPENCLAW_PUBLIC_TARGET_PORT:-3000}"
+OC_APP_MANIFEST_DIR="${OC_APP_MANIFEST_DIR:-k8s/oc-app}"
+OC_APP_DEPLOYMENT_MANIFEST="${OC_APP_DEPLOYMENT_MANIFEST:-${OC_APP_MANIFEST_DIR}/08-deployment.yaml}"
+OC_APP_SERVICE_MANIFEST="${OC_APP_SERVICE_MANIFEST:-${OC_APP_MANIFEST_DIR}/09-service-clusterip.yaml}"
+OC_APP_DEPLOYMENT_NAME="${OC_APP_DEPLOYMENT_NAME:-oc-app}"
+OC_APP_IMAGE="${OC_APP_IMAGE:-}"
+OC_APP_CONFIG_JSON_FILE="${OC_APP_CONFIG_JSON_FILE:-scripts/oci/app-config.json.example}"
+OC_APP_GATEWAY_BASE_URL="${OC_APP_GATEWAY_BASE_URL:-http://oci-anthropic-gateway.${K8S_GATEWAY_NAMESPACE}.svc.cluster.local:8000}"
+OC_APP_GATEWAY_TOKEN="${OC_APP_GATEWAY_TOKEN:-}"
+OC_APP_PUBLIC_EXPOSE="${OC_APP_PUBLIC_EXPOSE:-1}"
+OC_APP_PUBLIC_SERVICE_NAME="${OC_APP_PUBLIC_SERVICE_NAME:-oc-app-public}"
+OC_APP_PUBLIC_SERVICE_PORT="${OC_APP_PUBLIC_SERVICE_PORT:-18789}"
+OC_APP_PUBLIC_TARGET_PORT="${OC_APP_PUBLIC_TARGET_PORT:-18987}"
 
 run_cmd() {
   local cmd="$1"
@@ -130,6 +132,35 @@ print(f"[INFO] config.json model_definitions validated: {len(model_defs)} model(
 PYCFG
 }
 
+validate_oc_app_config_json() {
+  local cfg="$1"
+
+  python3 - "$cfg" <<'PYOC'
+import json
+import sys
+from pathlib import Path
+
+cfg_path = Path(sys.argv[1])
+try:
+    data = json.loads(cfg_path.read_text())
+except Exception as e:
+    print(f"[ERROR] invalid JSON in {cfg_path}: {e}", file=sys.stderr)
+    sys.exit(1)
+
+providers = data.get("models", {}).get("providers", {})
+if "oci-gateway" not in providers:
+    print("[ERROR] app config must include models.providers.oci-gateway", file=sys.stderr)
+    sys.exit(1)
+
+primary = data.get("agents", {}).get("defaults", {}).get("model", {}).get("primary")
+if not isinstance(primary, str) or not primary.startswith("oci-gateway/"):
+    print("[ERROR] app config agents.defaults.model.primary must start with oci-gateway/", file=sys.stderr)
+    sys.exit(1)
+
+print("[INFO] app config validated")
+PYOC
+}
+
 ensure_ocir_namespace() {
   if [[ -n "${OCIR_NAMESPACE:-}" ]]; then
     return
@@ -171,11 +202,11 @@ build_and_push_image_if_needed() {
       --compartment-id "$OCI_COMPARTMENT_OCID" \
       --region "$OCI_REGION" \
       --profile "${OCI_CLI_PROFILE:-DEFAULT}" >/dev/null 2>&1; then
-      run_cmd "oci artifacts container repository create \\
-        --compartment-id \"$OCI_COMPARTMENT_OCID\" \\
-        --display-name \"${OCIR_NAMESPACE}/${OCIR_REPO}\" \\
-        --is-immutable false \\
-        --region \"$OCI_REGION\" \\
+      run_cmd "oci artifacts container repository create \
+        --compartment-id \"$OCI_COMPARTMENT_OCID\" \
+        --display-name \"${OCIR_NAMESPACE}/${OCIR_REPO}\" \
+        --is-immutable false \
+        --region \"$OCI_REGION\" \
         --profile \"${OCI_CLI_PROFILE:-DEFAULT}\""
     else
       echo "[INFO] OCIR repository exists: ${OCIR_NAMESPACE}/${OCIR_REPO}"
@@ -195,47 +226,82 @@ render_manifest() {
   local out="$2"
 
   sed \
-    -e "s#namespace: gateway-prod#namespace: ${K8S_NAMESPACE}#g" \
-    -e "s#namespace: openclaw-prod#namespace: ${OPENCLAW_NAMESPACE}#g" \
+    -e "s#namespace: gateway-prod#namespace: ${K8S_GATEWAY_NAMESPACE}#g" \
+    -e "s#namespace: OC_APP_NS#namespace: ${K8S_OC_APP_NAMESPACE}#g" \
     -e "s#iad.ocir.io/replace-namespace/oci-gateway:replace-tag#${IMAGE_FULL//\//\\/}#g" \
+    -e "s#ghcr.io/oc-app/oc-app:replace-tag#${OC_APP_IMAGE//\//\\/}#g" \
+    -e "s#OC_APP#oc-app#g" \
+    -e "s#__OC_GATEWAY_TOKEN_ENV__#\$(OC_APP_GATEWAY_TOKEN)#g" \
     "$src" > "$out"
 }
 
-deploy_openclaw_if_requested() {
-  if [[ "$DEPLOY_OPENCLAW" -ne 1 ]]; then
+render_oc_app_config() {
+  local src="$1"
+  local out="$2"
+
+  sed \
+    -e "s#__OC_GATEWAY_BASE_URL__#${OC_APP_GATEWAY_BASE_URL//\//\\/}#g" \
+    -e "s#__OC_GATEWAY_TOKEN__#${OC_APP_GATEWAY_TOKEN//\//\\/}#g" \
+    "$src" > "$out"
+}
+
+deploy_oc_app_if_requested() {
+  if [[ "$DEPLOY_OC_APP" -ne 1 ]]; then
     return
   fi
 
-  : "${OPENCLAW_MANIFEST_DIR:?OPENCLAW_MANIFEST_DIR is required when --deploy-openclaw is set}"
-  ensure_dir_exists "$OPENCLAW_MANIFEST_DIR"
+  : "${OC_APP_IMAGE:?OC_APP_IMAGE is required when --deploy-oc-app is set}"
+  : "${OC_APP_CONFIG_JSON_FILE:?OC_APP_CONFIG_JSON_FILE is required when --deploy-oc-app is set}"
+  : "${OC_APP_GATEWAY_TOKEN:?OC_APP_GATEWAY_TOKEN is required when --deploy-oc-app is set}"
 
-  echo "[INFO] Deploying Openclaw manifests from: $OPENCLAW_MANIFEST_DIR"
+  ensure_dir_exists "$OC_APP_MANIFEST_DIR"
+  ensure_file_exists "$OC_APP_DEPLOYMENT_MANIFEST"
+  ensure_file_exists "$OC_APP_SERVICE_MANIFEST"
+  ensure_file_exists "$OC_APP_CONFIG_JSON_FILE"
+  validate_oc_app_config_json "$OC_APP_CONFIG_JSON_FILE"
 
-  run_cmd "kubectl --kubeconfig \"$KUBECONFIG_PATH\" create namespace \"$OPENCLAW_NAMESPACE\" --dry-run=client -o yaml | kubectl --kubeconfig \"$KUBECONFIG_PATH\" apply -f -"
-  run_cmd "kubectl --kubeconfig \"$KUBECONFIG_PATH\" -n \"$OPENCLAW_NAMESPACE\" apply -f \"$OPENCLAW_MANIFEST_DIR\""
+  echo "[INFO] Deploying oc-app manifests from: $OC_APP_MANIFEST_DIR"
 
-  run_cmd "kubectl --kubeconfig \"$KUBECONFIG_PATH\" -n \"$OPENCLAW_NAMESPACE\" set env deployment/\"$OPENCLAW_DEPLOYMENT_NAME\" \"$OPENCLAW_ENV_BASE_URL_KEY\"=\"$OPENCLAW_GATEWAY_BASE_URL\""
+  local tmp_dir
+  tmp_dir="$(mktemp -d)"
+  local oc_cfg_out="$tmp_dir/oc-app.rendered.json"
+  local oc_dep_out="$tmp_dir/oc-app-deployment.rendered.yaml"
+  local oc_svc_out="$tmp_dir/oc-app-service.rendered.yaml"
 
-  if [[ -n "$OPENCLAW_GATEWAY_API_KEY" ]]; then
-    run_cmd "kubectl --kubeconfig \"$KUBECONFIG_PATH\" -n \"$OPENCLAW_NAMESPACE\" set env deployment/\"$OPENCLAW_DEPLOYMENT_NAME\" \"$OPENCLAW_ENV_API_KEY_KEY\"=\"$OPENCLAW_GATEWAY_API_KEY\""
-  fi
+  render_oc_app_config "$OC_APP_CONFIG_JSON_FILE" "$oc_cfg_out"
+  render_manifest "$OC_APP_DEPLOYMENT_MANIFEST" "$oc_dep_out"
+  render_manifest "$OC_APP_SERVICE_MANIFEST" "$oc_svc_out"
 
-  if [[ "$OPENCLAW_PUBLIC_EXPOSE" == "1" ]]; then
-    run_cmd "kubectl --kubeconfig \"$KUBECONFIG_PATH\" -n \"$OPENCLAW_NAMESPACE\" expose deployment \"$OPENCLAW_DEPLOYMENT_NAME\" \
-      --name \"$OPENCLAW_PUBLIC_SERVICE_NAME\" \
+  run_cmd "kubectl --kubeconfig \"$KUBECONFIG_PATH\" create namespace \"$K8S_OC_APP_NAMESPACE\" --dry-run=client -o yaml | kubectl --kubeconfig \"$KUBECONFIG_PATH\" apply -f -"
+
+  run_cmd "kubectl --kubeconfig \"$KUBECONFIG_PATH\" -n \"$K8S_OC_APP_NAMESPACE\" create secret generic oc-app-gateway-auth \
+    --from-literal=OC_APP_GATEWAY_TOKEN=\"$OC_APP_GATEWAY_TOKEN\" \
+    --dry-run=client -o yaml | kubectl --kubeconfig \"$KUBECONFIG_PATH\" apply -f -"
+
+  run_cmd "kubectl --kubeconfig \"$KUBECONFIG_PATH\" -n \"$K8S_OC_APP_NAMESPACE\" create configmap oc-app-config \
+    --from-file=oc-app.json=\"$oc_cfg_out\" \
+    --dry-run=client -o yaml | kubectl --kubeconfig \"$KUBECONFIG_PATH\" apply -f -"
+
+  run_cmd "kubectl --kubeconfig \"$KUBECONFIG_PATH\" apply -f \"$oc_dep_out\""
+  run_cmd "kubectl --kubeconfig \"$KUBECONFIG_PATH\" apply -f \"$oc_svc_out\""
+
+  if [[ "$OC_APP_PUBLIC_EXPOSE" == "1" ]]; then
+    run_cmd "kubectl --kubeconfig \"$KUBECONFIG_PATH\" -n \"$K8S_OC_APP_NAMESPACE\" expose deployment \"$OC_APP_DEPLOYMENT_NAME\" \
+      --name \"$OC_APP_PUBLIC_SERVICE_NAME\" \
       --type LoadBalancer \
-      --port \"$OPENCLAW_PUBLIC_SERVICE_PORT\" \
-      --target-port \"$OPENCLAW_PUBLIC_TARGET_PORT\" \
+      --port \"$OC_APP_PUBLIC_SERVICE_PORT\" \
+      --target-port \"$OC_APP_PUBLIC_TARGET_PORT\" \
       --dry-run=client -o yaml | kubectl --kubeconfig \"$KUBECONFIG_PATH\" apply -f -"
 
-    run_cmd "kubectl --kubeconfig \"$KUBECONFIG_PATH\" -n \"$OPENCLAW_NAMESPACE\" get svc \"$OPENCLAW_PUBLIC_SERVICE_NAME\" -o wide"
+    run_cmd "kubectl --kubeconfig \"$KUBECONFIG_PATH\" -n \"$K8S_OC_APP_NAMESPACE\" get svc \"$OC_APP_PUBLIC_SERVICE_NAME\" -o wide"
   fi
 
-  run_cmd "kubectl --kubeconfig \"$KUBECONFIG_PATH\" -n \"$OPENCLAW_NAMESPACE\" rollout status deployment/\"$OPENCLAW_DEPLOYMENT_NAME\" --timeout=300s"
-  run_cmd "kubectl --kubeconfig \"$KUBECONFIG_PATH\" -n \"$OPENCLAW_NAMESPACE\" get pods,svc -o wide"
+  run_cmd "kubectl --kubeconfig \"$KUBECONFIG_PATH\" -n \"$K8S_OC_APP_NAMESPACE\" rollout status deployment/\"$OC_APP_DEPLOYMENT_NAME\" --timeout=300s"
+  run_cmd "kubectl --kubeconfig \"$KUBECONFIG_PATH\" -n \"$K8S_OC_APP_NAMESPACE\" get pods,svc -o wide"
+  run_cmd "rm -rf \"$tmp_dir\""
 }
 
-echo "[INFO] Purpose: deploy gateway to OKE namespace ${K8S_NAMESPACE} from deployment repository."
+echo "[INFO] Purpose: deploy gateway to OKE namespace ${K8S_GATEWAY_NAMESPACE} from deployment repository."
 
 ensure_file_exists "$GATEWAY_CONFIG_JSON_FILE"
 validate_gateway_config_json "$GATEWAY_CONFIG_JSON_FILE"
@@ -256,7 +322,7 @@ run_cmd "oci ce cluster create-kubeconfig \
   --file \"$KUBECONFIG_PATH\" \
   --region \"$OCI_REGION\" \
   --token-version 2.0.0 \
-  --kube-endpoint "${OKE_KUBE_ENDPOINT:-PRIVATE_ENDPOINT}" \
+  --kube-endpoint \"${OKE_KUBE_ENDPOINT:-PRIVATE_ENDPOINT}\" \
   --profile \"${OCI_CLI_PROFILE:-DEFAULT}\" \
   --overwrite"
 
@@ -267,7 +333,7 @@ if [[ "$CREATE_OCIR_PULL_SECRET" == "1" ]]; then
   : "${OCI_USERNAME:?OCI_USERNAME is required when CREATE_OCIR_PULL_SECRET=1}"
   : "${OCI_AUTH_TOKEN:?OCI_AUTH_TOKEN is required when CREATE_OCIR_PULL_SECRET=1}"
   ensure_ocir_namespace
-  run_cmd "kubectl --kubeconfig \"$KUBECONFIG_PATH\" -n \"$K8S_NAMESPACE\" create secret docker-registry ocir-cred \
+  run_cmd "kubectl --kubeconfig \"$KUBECONFIG_PATH\" -n \"$K8S_GATEWAY_NAMESPACE\" create secret docker-registry ocir-cred \
     --docker-server=\"${OCIR_REGION_KEY}.ocir.io\" \
     --docker-username=\"${OCIR_NAMESPACE}/${OCI_USERNAME}\" \
     --docker-password=\"$OCI_AUTH_TOKEN\" \
@@ -275,14 +341,13 @@ if [[ "$CREATE_OCIR_PULL_SECRET" == "1" ]]; then
     --dry-run=client -o yaml | kubectl --kubeconfig \"$KUBECONFIG_PATH\" apply -f -"
 fi
 
-run_cmd "kubectl --kubeconfig \"$KUBECONFIG_PATH\" -n \"$K8S_NAMESPACE\" create configmap gateway-config \
+run_cmd "kubectl --kubeconfig \"$KUBECONFIG_PATH\" -n \"$K8S_GATEWAY_NAMESPACE\" create configmap gateway-config \
   --from-file=config.json=\"$GATEWAY_CONFIG_JSON_FILE\" \
   --dry-run=client -o yaml | kubectl --kubeconfig \"$KUBECONFIG_PATH\" apply -f -"
 
-run_cmd "kubectl --kubeconfig \"$KUBECONFIG_PATH\" -n \"$K8S_NAMESPACE\" create secret generic gateway-debug-auth \
+run_cmd "kubectl --kubeconfig \"$KUBECONFIG_PATH\" -n \"$K8S_GATEWAY_NAMESPACE\" create secret generic gateway-debug-auth \
   --from-literal=DEBUG_UI_AUTH_TOKEN=\"$DEBUG_UI_AUTH_TOKEN\" \
   --dry-run=client -o yaml | kubectl --kubeconfig \"$KUBECONFIG_PATH\" apply -f -"
-
 
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
@@ -305,10 +370,10 @@ run_cmd "kubectl --kubeconfig \"$KUBECONFIG_PATH\" apply -f \"$NP_EGRESS_OUT\""
 if [[ -n "$NETWORK_POLICY_INGRESS_MANIFEST" ]]; then
   run_cmd "kubectl --kubeconfig \"$KUBECONFIG_PATH\" apply -f \"$NP_INGRESS_OUT\""
 fi
-run_cmd "kubectl --kubeconfig \"$KUBECONFIG_PATH\" -n \"$K8S_NAMESPACE\" rollout status deploy/oci-anthropic-gateway --timeout=300s"
-run_cmd "kubectl --kubeconfig \"$KUBECONFIG_PATH\" -n \"$K8S_NAMESPACE\" get pods,svc -o wide"
+run_cmd "kubectl --kubeconfig \"$KUBECONFIG_PATH\" -n \"$K8S_GATEWAY_NAMESPACE\" rollout status deploy/oci-anthropic-gateway --timeout=300s"
+run_cmd "kubectl --kubeconfig \"$KUBECONFIG_PATH\" -n \"$K8S_GATEWAY_NAMESPACE\" get pods,svc -o wide"
 
-deploy_openclaw_if_requested
+deploy_oc_app_if_requested
 
 if [[ "$APPLY" -eq 0 ]]; then
   echo "[INFO] Dry run only. Add --apply to execute commands."
