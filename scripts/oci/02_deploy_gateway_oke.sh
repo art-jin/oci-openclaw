@@ -328,6 +328,7 @@ run_cmd "oci ce cluster create-kubeconfig \
 
 run_cmd "kubectl --kubeconfig \"$KUBECONFIG_PATH\" apply -f \"$NAMESPACE_MANIFEST\""
 
+run_cmd "kubectl -n gateway-prod create serviceaccount oci-gateway-sa --dry-run=client -o yaml | kubectl apply -f -"
 if [[ "$CREATE_OCIR_PULL_SECRET" == "1" ]]; then
   : "${OCIR_REGION_KEY:?OCIR_REGION_KEY is required when CREATE_OCIR_PULL_SECRET=1}"
   : "${OCI_USERNAME:?OCI_USERNAME is required when CREATE_OCIR_PULL_SECRET=1}"

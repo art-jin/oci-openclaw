@@ -29,6 +29,8 @@ spec:
           env:
             - name: LOG_LEVEL
               value: INFO
+            - name: OCI_RESOURCE_PRINCIPAL_VERSION
+              value: "2.2"
           envFrom:
             - secretRef:
                 name: gateway-debug-auth
