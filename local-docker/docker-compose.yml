@@ -1,0 +1,102 @@
+# OCI OpenClaw Local Docker Compose
+#
+# 本机 Docker Desktop 部署配置
+# 同时管理 oci-anthropic-gateway 和 openclaw
+#
+# 使用方法:
+#   1. 复制 .env.example 到 .env 并填写配置
+#   2. 运行: docker-compose up -d
+#   3. 查看日志: docker-compose logs -f
+#   4. 停止服务: docker-compose down
+#
+# 架构:
+#   用户 -> openclaw:18789 -> oci-anthropic-gateway:8000 -> OCI GenAI
+
+services:
+  # ============================================================================
+  # OCI Anthropic Gateway
+  # Anthropic API 兼容网关，代理请求到 OCI GenAI
+  # ============================================================================
+  gateway:
+    image: ${GATEWAY_IMAGE:-oci-anthropic-gateway:latest}
+    container_name: oci-anthropic-gateway
+    restart: unless-stopped
+    ports:
+      - "${GATEWAY_PORT:-8000}:8000"
+    volumes:
+      # Gateway 配置文件
+      - ${GATEWAY_CONFIG_PATH:-./gateway-config.json}:/app/config.json:ro
+      # OCI 凭证（直接挂载宿主机文件，无需复制）
+      - ${OCI_CONFIG_FILE:-~/.oci/config}:/root/.oci/config:ro
+      - ${OCI_KEY_FILE:-~/.oci/oci_api_key.pem}:/root/.oci/oci_api_key.pem:ro
+      # Debug 日志目录
+      - ${GATEWAY_DEBUG_DIR:-./debug_dumps}:/app/debug_dumps
+    environment:
+      - LOG_LEVEL=${GATEWAY_LOG_LEVEL:-WARNING}
+      - DEBUG_UI_AUTH_TOKEN=${DEBUG_UI_AUTH_TOKEN:-}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/debug/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - gateway-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ============================================================================
+  # OpenClaw Gateway
+  # Anthropic 兼容的上游应用，通过 oci-anthropic-gateway 访问 OCI GenAI
+  # ============================================================================
+  openclaw:
+    image: ${OPENCLAW_IMAGE:-openclaw:local}
+    container_name: openclaw
+    restart: unless-stopped
+    ports:
+      - "${OPENCLAW_GATEWAY_PORT:-18789}:18987"
+    volumes:
+      # OpenClaw 配置目录
+      - ${OPENCLAW_CONFIG_DIR:-./openclaw-config}:/home/node/.openclaw
+      # 工作空间目录
+      - ${OPENCLAW_WORKSPACE_DIR:-./workspace}:/home/node/.openclaw/workspace
+    environment:
+      HOME: /home/node
+      TERM: xterm-256color
+      OPENCLAW_GATEWAY_TOKEN: ${OPENCLAW_GATEWAY_TOKEN}
+      # 可选：用于 Web UI 的 session key
+      CLAUDE_AI_SESSION_KEY: ${CLAUDE_AI_SESSION_KEY:-}
+      CLAUDE_WEB_SESSION_KEY: ${CLAUDE_WEB_SESSION_KEY:-}
+      CLAUDE_WEB_COOKIE: ${CLAUDE_WEB_COOKIE:-}
+    init: true
+    command:
+      - "node"
+      - "dist/index.js"
+      - "gateway"
+      - "--bind"
+      - "${OPENCLAW_BIND:-lan}"
+      - "--port"
+      - "18987"
+      - "--token"
+      - "ociclawtokenlogin"
+    depends_on:
+      gateway:
+        condition: service_healthy
+    networks:
+      - gateway-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+# ============================================================================
+# 网络配置
+# ============================================================================
+networks:
+  gateway-network:
+    driver: bridge
+    name: gateway-network

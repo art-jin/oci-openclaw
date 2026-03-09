@@ -1,0 +1,38 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gateway-config
+  namespace: gateway-prod
+data:
+  config.json: |
+    {
+      "compartment_id": "ocid1.compartment.oc1..replace",
+      "endpoint": "https://inference.generativeai.us-chicago-1.oci.oraclecloud.com",
+      "model_aliases": {
+        "claude-3-5-sonnet-20241022": "xai.grok-4-fast-non-reasoning"
+      },
+      "model_definitions": {
+        "xai.grok-4-fast-non-reasoning": {
+          "ocid": "ocid1.generativeaimodel.oc1..replace",
+          "api_format": "generic",
+          "max_tokens_key": "max_completion_tokens",
+          "temperature": 0.7
+        }
+      },
+      "default_model": "xai.grok-4-fast-non-reasoning",
+      "debug": false,
+      "debug_ui": {
+        "enabled": true,
+        "dump_dir": "debug_dumps",
+        "index_db": "debug_dumps/index.db",
+        "scan_interval_sec": 3,
+        "auth_mode": "bearer",
+        "max_detail_bytes": 2000000
+      },
+      "server": {
+        "host": "0.0.0.0",
+        "port": 8000,
+        "log_level": "warning"
+      }
+    }
+

@@ -1,0 +1,18 @@
+# 环境配置（包含敏感信息）
+.env
+
+# Gateway 配置（包含 OCI 信息）
+gateway-config.json
+
+# OpenClaw 配置目录
+openclaw-config/
+
+# OCI 凭证
+oci-credentials/
+
+# 运行时数据
+debug_dumps/
+workspace/
+
+# macOS
+.DS_Store
