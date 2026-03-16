@@ -893,3 +893,105 @@ bash scripts/oci/11_workload_identity_policy.sh delete --env scripts/oci/gateway
   ```bash
   kubectl -n openclaw-prod exec openclaw-0 -c cli -- cat /home/node/.openclaw/gateway-token
   ```
+
+---
+
+# 附录 F：进一步结合 OCI & OpenClaw 的工作计划（Work Plan）
+
+本附录用于记录“下一步要做什么”，以便把 OpenClaw 在 OKE 内作为 **Workload Identity** 工作负载运行，并满足：
+- agent 运行时通过 bash/tool 调用 `oci` CLI
+- 运维人工 `kubectl exec` 进入 Pod 后也能使用 `oci` CLI
+
+> 注意：以下是计划与改动点清单；在获得明确许可之前，不应执行任何修改。
+
+## F.1 目标与约束
+
+### 目标
+1. OpenClaw 运行容器内可执行 `oci ...`（用于 agent runtime 的 bash/tool）。
+2. 人工 `kubectl exec` 进入 openclaw Pod 的 `cli` 容器也可执行 `oci ...`。
+3. 认证方式：OKE Workload Identity（OCI Resource Principal / workload）。
+4. OpenClaw 允许直接访问 OCI API（HTTPS 443 egress）。
+
+### 权限范围（不包含 IAM）
+- Object Storage：bucket 预先创建；允许对象读写（`manage objects`）
+- Compute：允许创建/删除实例（`manage instance-family`）
+- Network：允许使用虚拟网络（`use virtual-network-family`）
+- Block Volume：允许卷管理（`manage volume-family`）
+- 不允许：IAM policy 管理等 IAM 操作
+
+## F.2 本部署仓库内将要改动的文件与改动点（清单）
+
+### 1) `k8s/openclaw/05-statefulset.yaml`
+**目的**：为 openclaw Pod 增加 Workload Identity 所需 env，使容器内 `oci` CLI/SDK 能以 Resource Principal 身份认证。
+
+**改动点**：
+- 在 `containers: - name: gateway` 的 `env:` 中新增：
+  - `OCI_RESOURCE_PRINCIPAL_VERSION: "2.2"`
+  - `OCI_RESOURCE_PRINCIPAL_REGION: "__OCI_RESOURCE_PRINCIPAL_REGION__"`
+- 在 `containers: - name: cli` 的 `env:` 中同样新增以上两项（便于人工 exec 进入该容器直接使用 `oci`）。
+
+**备注**：
+- 参考 gateway 侧做法：`k8s/04-deployment.yaml`。
+- 部署脚本 `scripts/oci/02_deploy_gateway_oke.sh` 已支持渲染占位符 `__OCI_RESOURCE_PRINCIPAL_REGION__`，可复用现有逻辑。
+
+---
+
+### 2) `k8s/openclaw/07-networkpolicy-egress.yaml`
+**目的**：允许 openclaw Pod 访问 OCI API（HTTPS 443），以便 `oci` CLI 能实际发起请求。
+
+**改动点**：
+- 在现有 egress（DNS + 到 gateway:8000）基础上新增一条：允许 `TCP 443` 到 `0.0.0.0/0`。
+
+**风险/权衡**：
+- 这是“不严格”模式：允许任意外部 HTTPS。后续可通过 OCI 网络侧进一步收敛目的地范围。
+
+---
+
+### 3) `scripts/oci/11_workload_identity_policy.sh`
+**目的**：为 `openclaw-prod/openclaw-sa` 增加 `openclaw-ops` 模式的 policy statements 生成/更新能力（不包含 IAM 管理权限）。
+
+**改动点（建议实现方式）**：
+- 增加参数：`--mode gateway-genai|openclaw-ops`（默认保持现状 `gateway-genai` 以避免影响现有网关部署）。
+- `openclaw-ops` 模式下 statements（模板变量由脚本注入 COMPARTMENT_ID / CLUSTER_OCID / NAMESPACE / SERVICE_ACCOUNT）：
+  1) `Allow any-user to read buckets in compartment id <COMPARTMENT_ID> where all {...}`
+  2) `Allow any-user to manage objects in compartment id <COMPARTMENT_ID> where all {...}`
+  3) `Allow any-user to manage instance-family in compartment id <COMPARTMENT_ID> where all {...}`
+  4) `Allow any-user to read instance-images in compartment id <COMPARTMENT_ID> where all {...}`
+  5) `Allow any-user to use virtual-network-family in compartment id <COMPARTMENT_ID> where all {...}`
+  6) `Allow any-user to manage volume-family in compartment id <COMPARTMENT_ID> where all {...}`
+
+**计划运行方式**：
+```bash
+bash scripts/oci/11_workload_identity_policy.sh create-or-update --env scripts/oci/gateway.env \
+  --namespace openclaw-prod --service-account openclaw-sa \
+  --policy-name oke-openclaw-workload-identity \
+  --mode openclaw-ops
+```
+
+## F.3 外部依赖 / 配套动作（不在本部署仓库直接改动）
+
+### OpenClaw 镜像：默认安装 `oci-cli`
+**目的**：让 agent runtime 的 bash/tool 能直接执行 `oci ...`。
+
+**动作**：
+- 在 OpenClaw 源码仓库（例如 `../openclaw/Dockerfile`）runtime stage 中安装 `oci-cli`（参考 README 中已记录的 `install.sh` 方式）。
+- 构建并推送到 OCIR，并更新 `scripts/oci/gateway.env` 的 `OPENCLAW_IMAGE` tag。
+
+## F.4 验证计划（实施后）
+
+1) 验证 openclaw 容器内存在 `oci`：
+```bash
+kubectl -n openclaw-prod exec -it statefulset/openclaw -c gateway -- oci --version
+kubectl -n openclaw-prod exec -it statefulset/openclaw -c cli -- oci --version
+```
+
+2) 验证 Resource Principal：
+```bash
+kubectl -n openclaw-prod exec -it statefulset/openclaw -c cli -- oci os ns get
+```
+
+3) 验证能力（按权限范围）：
+- Object Storage：对预先存在 bucket 做 list/put/get
+- Compute：launch/terminate instance（需提供 image/subnet 等参数）
+- Block Volume：create/attach/detach/delete volume
+
