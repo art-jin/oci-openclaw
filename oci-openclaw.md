@@ -24,6 +24,49 @@
   - 对外访问方式：不创建 LoadBalancer；运维侧通过 **kubectl port-forward** 或 **SSH 本地端口转发**访问 UI
   - 端口：`18789`
 
+### 1.2 实现架构（ASCII 图，含端口转发访问路径）
+
+> README 通常描述“目标架构”；这里补充本仓库落地后的“实现架构”，把**集群内调用链路**与**外部访问路径**放在一张图里。
+
+```
+                  (Cluster: OCI OKE)
+┌───────────────────────────────────────────────────────────────────────────┐
+│                                                                           │
+│  Namespace: openclaw-prod                   Namespace: gateway-prod       │
+│  ┌─────────────────────────────┐           ┌───────────────────────────┐ │
+│  │ Pod: openclaw-0             │           │ Pod: oci-anthropic-gateway│ │
+│  │  - UI/Gateway :18789        │           │  - Anthropic API :8000     │ │
+│  │  - egress: only to gateway  │  HTTP     │  - WI -> OCI GenAI HTTPS   │ │
+│  └───────────────┬─────────────┘  :8000    └──────────────┬────────────┘ │
+│                  │        via Cluster DNS/service          │              │
+│                  │  http://oci-anthropic-gateway...:8000   │              │
+│                  v                                         v              │
+│          ┌───────────────────┐                   ┌────────────────────┐  │
+│          │ SVC openclaw      │                   │ OCI Generative AI   │  │
+│          │  ClusterIP :18789 │                   │  inference endpoint │  │
+│          └─────────┬─────────┘                   └────────────────────┘  │
+│                    │                                                       │
+│          ┌─────────v─────────┐                                             │
+│          │ SVC oci-anthropic │                                             │
+│          │ -gateway ClusterIP│                                             │
+│          │ :8000             │                                             │
+│          └───────────────────┘                                             │
+│                                                                           │
+└───────────────────────────────────────────────────────────────────────────┘
+
+(External access: no LoadBalancer)
+
+Mac Browser/Terminal
+  │  http://127.0.0.1:18789
+  │
+  ├─ ssh -L 18789:127.0.0.1:18789 <user>@<oci-vm>
+  │
+OCI VM (bastion/admin)
+  │  kubectl -n openclaw-prod port-forward svc/openclaw 18789:18789
+  │
+  └─ forwards to ClusterIP svc/openclaw:18789 → openclaw Pod
+```
+
 **请求流：**
 
 ```
@@ -298,7 +341,7 @@ kubectl -n openclaw-prod exec openclaw-0 -c cli -- cat /home/node/.openclaw/gate
 ```
 
 本次读到的 token：
-- `lLiuurBbpFxxWOlHHhEOpN9g79csPvRRKw0TUVHiBinC3pml`
+- `<OPENCLAW_GATEWAY_TOKEN>`
 
 > 安全提示：该 token 等价于 UI 会话凭证，建议仅在受控终端使用，必要时轮换。
 
