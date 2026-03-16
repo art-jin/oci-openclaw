@@ -338,7 +338,120 @@ kubectl -n openclaw-prod exec -it openclaw-0 -c cli -- openclaw agent \
 
 ---
 
-## 10. 故障排查（速查）
+## 10. 日常运维流程（推荐：新建集群 vs 复用集群）
+
+下面给出两种常见工作模式的“最推荐流程”，并明确哪些参数需要改、哪些通常不动。
+
+### 10.1 模式 A：每次都新建 OKE 集群（一次性环境/演示环境）
+
+**适用场景：** PoC、演示、隔离测试环境。
+
+**你通常需要改的内容：**
+
+1) `scripts/oci/gateway.env`
+- 集群相关（每次新集群必变）：
+  - `OCI_CLUSTER_OCID`（新集群 OCID）
+  - 若你使用脚本创建集群，还会涉及 `OKE_*` 一系列参数（如 VCN/Subnet/NodePool 等）
+- Workload Identity 相关（跟集群绑定）：
+  - `OCI_CLUSTER_OCID`（会进入 IAM policy statement 的 `request.principal.cluster_id`）
+- OCI 基本信息（通常不变）：
+  - `OCI_REGION`、`OCI_HOME_REGION`、`OCI_COMPARTMENT_OCID`
+- 镜像（通常不变，除非你换 tag）：
+  - `GATEWAY_IMAGE`、`OPENCLAW_IMAGE`
+- OCIR 拉取凭据（通常不变，但注意有效期/轮换）：
+  - `OCI_USERNAME`、`OCI_AUTH_TOKEN`、`OCIR_REGION_KEY`、`OCIR_NAMESPACE`
+
+2) `config.json`
+- 通常不变：`compartment_id`、`endpoint`、`model_definitions.*.ocid`、`default_model`
+- 仅当你切换模型/compartment 时需要改。
+
+3) Kubernetes side（可能需要改）：
+- StorageClass：若新集群没有 `oci-bv`，需要在集群先创建该 StorageClass 或修改 `k8s/openclaw/05-statefulset.yaml` 使用已有 StorageClass。
+
+**推荐执行步骤（最短闭环）：**
+
+```bash
+# (1) 如果需要：创建/准备 kubeconfig（你也可以用 02_deploy_gateway_oke.sh 内置的 create-kubeconfig）
+oci ce cluster create-kubeconfig \
+  --cluster-id "<NEW_OKE_CLUSTER_OCID>" \
+  --file "$HOME/.kube/config" \
+  --region "<OCI_REGION>" \
+  --token-version 2.0.0 \
+  --kube-endpoint PUBLIC_ENDPOINT \
+  --profile "<PROFILE>" \
+  --overwrite
+
+# (2) 更新 Workload Identity policy（必须针对新 cluster_id）
+bash scripts/oci/11_workload_identity_policy.sh create-or-update --env scripts/oci/gateway.env
+
+# (3) 部署（gateway + openclaw）
+bash scripts/oci/02_deploy_gateway_oke.sh --env scripts/oci/gateway.env --deploy-openclaw --apply
+
+# (4) 验证
+bash scripts/oci/03_verify_gateway.sh scripts/oci/gateway.env
+```
+
+**哪些内容你通常不用动：**
+- `k8s/openclaw/06-service-internal-lb.yaml`：即便存在文件，也不再被脚本 apply（我们推荐不暴露 LB）。
+- 绝大部分 `k8s/` 与 `k8s/openclaw/` manifests（除非你要调整资源/存储类/网络策略）。
+
+---
+
+### 10.2 模式 B：复用同一个 OKE 集群，只更新镜像/配置（长期环境）
+
+**适用场景：** 日常迭代、稳定环境（dev/staging/prod）。
+
+**你通常需要改的内容：**
+
+1) `scripts/oci/gateway.env`
+- 若只是发版：
+  - `GATEWAY_IMAGE`（新 tag）
+  - `OPENCLAW_IMAGE`（新 tag）
+- 若只是改模型映射：
+  - 不一定要改 env；主要改 `config.json`
+- 通常不变：
+  - `OCI_CLUSTER_OCID`（集群不变）
+  - `OCI_REGION`、`OCI_COMPARTMENT_OCID`
+
+2) `config.json`
+- 你更换模型（OCID）/默认模型/alias 时修改。
+
+3) IAM policy
+- **通常不需要改**（因为 cluster_id/namespace/sa 不变）。
+- 只有当你改了以下任一项才需要更新 policy：
+  - namespace（`gateway-prod`）
+  - service account（`oci-gateway-sa`）
+  - OKE cluster OCID
+  - compartment
+
+**推荐执行步骤（最短闭环）：**
+
+```bash
+# (1) 如需要：更新 policy（多数情况下可跳过）
+bash scripts/oci/11_workload_identity_policy.sh create-or-update --env scripts/oci/gateway.env
+
+# (2) 部署 apply（会滚动更新 deployment/statefulset）
+bash scripts/oci/02_deploy_gateway_oke.sh --env scripts/oci/gateway.env --deploy-openclaw --apply
+
+# (3) 验证
+bash scripts/oci/03_verify_gateway.sh scripts/oci/gateway.env
+```
+
+**建议习惯：**
+- 更新镜像 tag 后，优先观察滚动发布：
+  ```bash
+  kubectl -n gateway-prod rollout status deploy/oci-anthropic-gateway
+  kubectl -n openclaw-prod rollout status statefulset/openclaw
+  ```
+- 如果只改了 `config.json`（gateway ConfigMap），deployment 会被 apply 更新；但是否触发重启取决于 manifest 是否带了 checksum/重启策略。
+  若你发现 ConfigMap 变更未生效，可手工滚动重启：
+  ```bash
+  kubectl -n gateway-prod rollout restart deploy/oci-anthropic-gateway
+  ```
+
+---
+
+## 11. 故障排查（速查）
 
 ### 10.1 `/v1/messages` internal_error
 - 看 gateway 日志：
