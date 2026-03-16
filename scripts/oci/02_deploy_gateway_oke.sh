@@ -4,6 +4,7 @@ set -euo pipefail
 ENV_FILE="scripts/oci/gateway.env.example"
 APPLY=0
 DEPLOY_OC_APP=0
+DEPLOY_OPENCLAW=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -19,9 +20,13 @@ while [[ $# -gt 0 ]]; do
       DEPLOY_OC_APP=1
       shift
       ;;
+    --deploy-openclaw)
+      DEPLOY_OPENCLAW=1
+      shift
+      ;;
     *)
       echo "[ERROR] Unknown argument: $1" >&2
-      echo "Usage: $0 [--env path/to/gateway.env] [--apply] [--deploy-oc-app]" >&2
+      echo "Usage: $0 [--env path/to/gateway.env] [--apply] [--deploy-openclaw]" >&2
       exit 1
       ;;
   esac
@@ -42,8 +47,22 @@ set +a
 : "${DEBUG_UI_AUTH_TOKEN:?DEBUG_UI_AUTH_TOKEN is required}"
 : "${GATEWAY_CONFIG_JSON_FILE:?GATEWAY_CONFIG_JSON_FILE is required}"
 
+AUTH_MODE="${AUTH_MODE:-workload_identity}"
+if [[ "$AUTH_MODE" != "workload_identity" && "$AUTH_MODE" != "oci_config_secret" ]]; then
+  echo "[ERROR] AUTH_MODE must be workload_identity or oci_config_secret" >&2
+  exit 1
+fi
+
 K8S_GATEWAY_NAMESPACE="${K8S_GATEWAY_NAMESPACE:-${K8S_NAMESPACE:-gateway-prod}}"
 K8S_OC_APP_NAMESPACE="${K8S_OC_APP_NAMESPACE:-oc-app-prod}"
+K8S_OPENCLAW_NAMESPACE="${K8S_OPENCLAW_NAMESPACE:-openclaw-prod}"
+AUTH_MODE="${AUTH_MODE:-workload_identity}"
+OCI_RESOURCE_PRINCIPAL_REGION="${OCI_RESOURCE_PRINCIPAL_REGION:-${OCI_REGION}}"
+
+OPENCLAW_MANIFEST_DIR="${OPENCLAW_MANIFEST_DIR:-k8s/openclaw}"
+OPENCLAW_IMAGE="${OPENCLAW_IMAGE:-}"
+OPENCLAW_GATEWAY_BASE_URL="${OPENCLAW_GATEWAY_BASE_URL:-http://oci-anthropic-gateway.${K8S_GATEWAY_NAMESPACE}.svc.cluster.local:8000}"
+OPENCLAW_GATEWAY_API_KEY="${OPENCLAW_GATEWAY_API_KEY:-any-value-works}"
 KUBECONFIG_PATH="${KUBECONFIG_PATH:-$HOME/.kube/config}"
 
 GATEWAY_IMAGE_MODE="${GATEWAY_IMAGE_MODE:-prebuilt}"
@@ -197,14 +216,18 @@ build_and_push_image_if_needed() {
   IMAGE_FULL="${OCIR_REGION_KEY}.ocir.io/${OCIR_NAMESPACE}/${OCIR_REPO}:${IMAGE_TAG}"
 
   if [[ "$APPLY" -eq 1 ]]; then
-    if ! oci artifacts container repository get \
-      --repository-name "${OCIR_NAMESPACE}/${OCIR_REPO}" \
+    # Note: OCI CLI does not consistently support "repository get by name" across versions.
+    # Use list+filter to determine existence.
+    if oci artifacts container repository list \
       --compartment-id "$OCI_COMPARTMENT_OCID" \
       --region "$OCI_REGION" \
-      --profile "${OCI_CLI_PROFILE:-DEFAULT}" >/dev/null 2>&1; then
+      --profile "${OCI_CLI_PROFILE:-DEFAULT}" \
+      --all \
+      --query "length(data[?\"display-name\"=='${OCIR_NAMESPACE}/${OCIR_REPO}'])" \
+      --raw-output 2>/dev/null | grep -qx "0"; then
       run_cmd "oci artifacts container repository create \
         --compartment-id \"$OCI_COMPARTMENT_OCID\" \
-        --display-name \"${OCIR_NAMESPACE}/${OCIR_REPO}\" \
+        --display-name \"${OCIR_REPO}\" \
         --is-immutable false \
         --region \"$OCI_REGION\" \
         --profile \"${OCI_CLI_PROFILE:-DEFAULT}\""
@@ -212,8 +235,8 @@ build_and_push_image_if_needed() {
       echo "[INFO] OCIR repository exists: ${OCIR_NAMESPACE}/${OCIR_REPO}"
     fi
   else
-    echo "+ oci artifacts container repository get --repository-name \"${OCIR_NAMESPACE}/${OCIR_REPO}\" ..."
-    echo "+ (if not exists) oci artifacts container repository create --display-name \"${OCIR_NAMESPACE}/${OCIR_REPO}\" ..."
+    echo "+ oci artifacts container repository list --compartment-id \"$OCI_COMPARTMENT_OCID\" --all ... (filter display-name == ${OCIR_NAMESPACE}/${OCIR_REPO})"
+    echo "+ (if not exists) oci artifacts container repository create --display-name \"${OCIR_REPO}\" ..."
   fi
 
   run_cmd "docker login ${OCIR_REGION_KEY}.ocir.io -u \"${OCIR_NAMESPACE}/${OCI_USERNAME}\" -p \"$OCI_AUTH_TOKEN\""
@@ -225,13 +248,28 @@ render_manifest() {
   local src="$1"
   local out="$2"
 
+  # Escape replacement strings for sed (at least '&' which otherwise expands to the matched text).
+  local image_esc oc_app_image_esc rp_region_esc openclaw_image_esc openclaw_base_url_esc openclaw_api_key_esc
+  image_esc="${IMAGE_FULL//&/\\&}"
+  oc_app_image_esc="${OC_APP_IMAGE//&/\\&}"
+  rp_region_esc="${OCI_RESOURCE_PRINCIPAL_REGION//&/\\&}"
+  openclaw_image_esc="${OPENCLAW_IMAGE//&/\\&}"
+  openclaw_base_url_esc="${OPENCLAW_GATEWAY_BASE_URL//&/\\&}"
+  openclaw_api_key_esc="${OPENCLAW_GATEWAY_API_KEY//&/\\&}"
+
   sed \
     -e "s#namespace: gateway-prod#namespace: ${K8S_GATEWAY_NAMESPACE}#g" \
     -e "s#namespace: OC_APP_NS#namespace: ${K8S_OC_APP_NAMESPACE}#g" \
-    -e "s#iad.ocir.io/replace-namespace/oci-gateway:replace-tag#${IMAGE_FULL//\//\\/}#g" \
-    -e "s#ghcr.io/oc-app/oc-app:replace-tag#${OC_APP_IMAGE//\//\\/}#g" \
+    -e "s#namespace: openclaw-prod#namespace: ${K8S_OPENCLAW_NAMESPACE}#g" \
+    -e "s#iad.ocir.io/replace-namespace/oci-gateway:replace-tag#${image_esc//\//\\/}#g" \
+    -e "s#ghcr.io/oc-app/oc-app:replace-tag#${oc_app_image_esc//\//\\/}#g" \
     -e "s#OC_APP#oc-app#g" \
     -e "s#__OC_GATEWAY_TOKEN_ENV__#\$(OC_APP_GATEWAY_TOKEN)#g" \
+    -e "s#__OCI_RESOURCE_PRINCIPAL_REGION__#${rp_region_esc//\//\\/}#g" \
+    -e "s#__OPENCLAW_IMAGE__#${openclaw_image_esc//\//\\/}#g" \
+    -e "s#__OPENCLAW_GATEWAY_BASE_URL__#${openclaw_base_url_esc//\//\\/}#g" \
+    -e "s#__OPENCLAW_GATEWAY_API_KEY__#${openclaw_api_key_esc//\//\\/}#g" \
+    -e "s#__OPENCLAW_PUBLIC_EXPOSE__#0#g" \
     "$src" > "$out"
 }
 
@@ -243,6 +281,82 @@ render_oc_app_config() {
     -e "s#__OC_GATEWAY_BASE_URL__#${OC_APP_GATEWAY_BASE_URL//\//\\/}#g" \
     -e "s#__OC_GATEWAY_TOKEN__#${OC_APP_GATEWAY_TOKEN//\//\\/}#g" \
     "$src" > "$out"
+}
+
+deploy_openclaw_if_requested() {
+  if [[ "$DEPLOY_OPENCLAW" -ne 1 ]]; then
+    return
+  fi
+
+  # If image is not explicitly set, optionally build/push OpenClaw to OCIR.
+  if [[ -z "${OPENCLAW_IMAGE:-}" && "${OPENCLAW_IMAGE_MODE:-}" == "build" ]]; then
+    echo "[INFO] OPENCLAW_IMAGE is empty and OPENCLAW_IMAGE_MODE=build; building/pushing OpenClaw to OCIR"
+    if [[ "$APPLY" -eq 1 ]]; then
+      OPENCLAW_IMAGE="$(bash scripts/oci/02_build_push_openclaw_ocir.sh "$ENV_FILE" --apply | tail -n 1)"
+    else
+      OPENCLAW_IMAGE="$(bash scripts/oci/02_build_push_openclaw_ocir.sh "$ENV_FILE" | tail -n 1)"
+    fi
+    echo "[INFO] OpenClaw image: ${OPENCLAW_IMAGE}"
+
+  fi
+
+  : "${OPENCLAW_IMAGE:?OPENCLAW_IMAGE is required when --deploy-openclaw is set}"
+
+  ensure_dir_exists "$OPENCLAW_MANIFEST_DIR"
+
+  local ns_manifest="$OPENCLAW_MANIFEST_DIR/00-namespace.yaml"
+  local sa_manifest="$OPENCLAW_MANIFEST_DIR/00-serviceaccount.yaml"
+  local cm_manifest="$OPENCLAW_MANIFEST_DIR/01-configmap-openclaw-config-template.yaml"
+  local secret_manifest="$OPENCLAW_MANIFEST_DIR/02-secret-openclaw-provider.yaml"
+  local headless_svc_manifest="$OPENCLAW_MANIFEST_DIR/03-service-headless.yaml"
+  local svc_manifest="$OPENCLAW_MANIFEST_DIR/04-service-clusterip.yaml"
+  local sts_manifest="$OPENCLAW_MANIFEST_DIR/05-statefulset.yaml"
+  local np_egress_manifest="$OPENCLAW_MANIFEST_DIR/07-networkpolicy-egress.yaml"
+
+  ensure_file_exists "$ns_manifest"
+  ensure_file_exists "$sa_manifest"
+  ensure_file_exists "$cm_manifest"
+  ensure_file_exists "$secret_manifest"
+  ensure_file_exists "$headless_svc_manifest"
+  ensure_file_exists "$svc_manifest"
+  ensure_file_exists "$sts_manifest"
+  ensure_file_exists "$np_egress_manifest"
+
+  echo "[INFO] Deploying openclaw manifests from: $OPENCLAW_MANIFEST_DIR"
+
+  local tmp_dir
+  tmp_dir="$(mktemp -d)"
+  local ns_out="$tmp_dir/00-namespace.rendered.yaml"
+  local sa_out="$tmp_dir/00-serviceaccount.rendered.yaml"
+  local cm_out="$tmp_dir/01-configmap.rendered.yaml"
+  local secret_out="$tmp_dir/02-secret.rendered.yaml"
+  local headless_svc_out="$tmp_dir/03-service-headless.rendered.yaml"
+  local svc_out="$tmp_dir/04-service.rendered.yaml"
+  local sts_out="$tmp_dir/05-statefulset.rendered.yaml"
+  local np_egress_out="$tmp_dir/07-networkpolicy-egress.rendered.yaml"
+
+  render_manifest "$ns_manifest" "$ns_out"
+  render_manifest "$sa_manifest" "$sa_out"
+  render_manifest "$cm_manifest" "$cm_out"
+  render_manifest "$secret_manifest" "$secret_out"
+  render_manifest "$headless_svc_manifest" "$headless_svc_out"
+  render_manifest "$svc_manifest" "$svc_out"
+  render_manifest "$sts_manifest" "$sts_out"
+  render_manifest "$np_egress_manifest" "$np_egress_out"
+
+  run_cmd "kubectl --kubeconfig \"$KUBECONFIG_PATH\" apply -f \"$ns_out\""
+  run_cmd "kubectl --kubeconfig \"$KUBECONFIG_PATH\" apply -f \"$sa_out\""
+  run_cmd "kubectl --kubeconfig \"$KUBECONFIG_PATH\" apply -f \"$cm_out\""
+  run_cmd "kubectl --kubeconfig \"$KUBECONFIG_PATH\" apply -f \"$secret_out\""
+  run_cmd "kubectl --kubeconfig \"$KUBECONFIG_PATH\" apply -f \"$headless_svc_out\""
+  run_cmd "kubectl --kubeconfig \"$KUBECONFIG_PATH\" apply -f \"$svc_out\""
+  run_cmd "kubectl --kubeconfig \"$KUBECONFIG_PATH\" apply -f \"$np_egress_out\""
+  run_cmd "kubectl --kubeconfig \"$KUBECONFIG_PATH\" apply -f \"$sts_out\""
+
+  run_cmd "kubectl --kubeconfig \"$KUBECONFIG_PATH\" -n \"$K8S_OPENCLAW_NAMESPACE\" rollout status statefulset/openclaw --timeout=600s"
+  run_cmd "kubectl --kubeconfig \"$KUBECONFIG_PATH\" -n \"$K8S_OPENCLAW_NAMESPACE\" get pods,svc -o wide"
+
+  run_cmd "rm -rf \"$tmp_dir\""
 }
 
 deploy_oc_app_if_requested() {
@@ -328,18 +442,31 @@ run_cmd "oci ce cluster create-kubeconfig \
 
 run_cmd "kubectl --kubeconfig \"$KUBECONFIG_PATH\" apply -f \"$NAMESPACE_MANIFEST\""
 
-run_cmd "kubectl -n gateway-prod create serviceaccount oci-gateway-sa --dry-run=client -o yaml | kubectl apply -f -"
+run_cmd "kubectl --kubeconfig \"$KUBECONFIG_PATH\" -n \"$K8S_GATEWAY_NAMESPACE\" create serviceaccount oci-gateway-sa --dry-run=client -o yaml | kubectl --kubeconfig \"$KUBECONFIG_PATH\" apply -f -"
 if [[ "$CREATE_OCIR_PULL_SECRET" == "1" ]]; then
   : "${OCIR_REGION_KEY:?OCIR_REGION_KEY is required when CREATE_OCIR_PULL_SECRET=1}"
   : "${OCI_USERNAME:?OCI_USERNAME is required when CREATE_OCIR_PULL_SECRET=1}"
   : "${OCI_AUTH_TOKEN:?OCI_AUTH_TOKEN is required when CREATE_OCIR_PULL_SECRET=1}"
   ensure_ocir_namespace
+
+  # Gateway namespace pull secret
   run_cmd "kubectl --kubeconfig \"$KUBECONFIG_PATH\" -n \"$K8S_GATEWAY_NAMESPACE\" create secret docker-registry ocir-cred \
     --docker-server=\"${OCIR_REGION_KEY}.ocir.io\" \
     --docker-username=\"${OCIR_NAMESPACE}/${OCI_USERNAME}\" \
     --docker-password=\"$OCI_AUTH_TOKEN\" \
     --docker-email=\"ops@example.com\" \
     --dry-run=client -o yaml | kubectl --kubeconfig \"$KUBECONFIG_PATH\" apply -f -"
+
+  # OpenClaw namespace pull secret (needed if OpenClaw is in private OCIR)
+  if [[ "$DEPLOY_OPENCLAW" -eq 1 ]]; then
+    run_cmd "kubectl --kubeconfig \"$KUBECONFIG_PATH\" create namespace \"$K8S_OPENCLAW_NAMESPACE\" --dry-run=client -o yaml | kubectl --kubeconfig \"$KUBECONFIG_PATH\" apply -f -"
+    run_cmd "kubectl --kubeconfig \"$KUBECONFIG_PATH\" -n \"$K8S_OPENCLAW_NAMESPACE\" create secret docker-registry ocir-cred \
+      --docker-server=\"${OCIR_REGION_KEY}.ocir.io\" \
+      --docker-username=\"${OCIR_NAMESPACE}/${OCI_USERNAME}\" \
+      --docker-password=\"$OCI_AUTH_TOKEN\" \
+      --docker-email=\"ops@example.com\" \
+      --dry-run=client -o yaml | kubectl --kubeconfig \"$KUBECONFIG_PATH\" apply -f -"
+  fi
 fi
 
 run_cmd "kubectl --kubeconfig \"$KUBECONFIG_PATH\" -n \"$K8S_GATEWAY_NAMESPACE\" create configmap gateway-config \
@@ -373,6 +500,8 @@ if [[ -n "$NETWORK_POLICY_INGRESS_MANIFEST" ]]; then
 fi
 run_cmd "kubectl --kubeconfig \"$KUBECONFIG_PATH\" -n \"$K8S_GATEWAY_NAMESPACE\" rollout status deploy/oci-anthropic-gateway --timeout=300s"
 run_cmd "kubectl --kubeconfig \"$KUBECONFIG_PATH\" -n \"$K8S_GATEWAY_NAMESPACE\" get pods,svc -o wide"
+
+deploy_openclaw_if_requested
 
 deploy_oc_app_if_requested
 

@@ -83,7 +83,9 @@ run_cmd "kubectl --kubeconfig \"$KUBECONFIG_PATH\" -n \"$K8S_NAMESPACE\" delete 
 run_cmd "kubectl --kubeconfig \"$KUBECONFIG_PATH\" -n \"$K8S_NAMESPACE\" delete service oci-anthropic-gateway --ignore-not-found"
 run_cmd "kubectl --kubeconfig \"$KUBECONFIG_PATH\" -n \"$K8S_NAMESPACE\" delete networkpolicy gateway-egress-restrict --ignore-not-found"
 run_cmd "kubectl --kubeconfig \"$KUBECONFIG_PATH\" -n \"$K8S_NAMESPACE\" delete configmap gateway-config --ignore-not-found"
-run_cmd "kubectl --kubeconfig \"$KUBECONFIG_PATH\" -n \"$K8S_NAMESPACE\" delete secret gateway-debug-auth gateway-oci-sdk ocir-cred --ignore-not-found"
+run_cmd "kubectl --kubeconfig \"$KUBECONFIG_PATH\" -n \"$K8S_NAMESPACE\" delete secret gateway-debug-auth ocir-cred --ignore-not-found"
+# Legacy secret name (oci_config_secret mode)
+run_cmd "kubectl --kubeconfig \"$KUBECONFIG_PATH\" -n \"$K8S_NAMESPACE\" delete secret gateway-oci-sdk --ignore-not-found"
 
 if [[ "$DELETE_NAMESPACE" -eq 1 ]]; then
   run_cmd "kubectl --kubeconfig \"$KUBECONFIG_PATH\" delete namespace \"$K8S_NAMESPACE\" --ignore-not-found"

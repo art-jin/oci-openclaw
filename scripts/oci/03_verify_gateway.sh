@@ -14,6 +14,7 @@ set +a
 
 K8S_GATEWAY_NAMESPACE="${K8S_GATEWAY_NAMESPACE:-${K8S_NAMESPACE:-gateway-prod}}"
 K8S_OC_APP_NAMESPACE="${K8S_OC_APP_NAMESPACE:-oc-app-prod}"
+K8S_OPENCLAW_NAMESPACE="${K8S_OPENCLAW_NAMESPACE:-openclaw-prod}"
 KUBECONFIG_PATH="${KUBECONFIG_PATH:-$HOME/.kube/config}"
 SERVICE_NAME="${SERVICE_NAME:-oci-anthropic-gateway}"
 VERIFY_MODEL_ID="${VERIFY_MODEL_ID:-openai.gpt-5.2-2025-12-11}"
@@ -21,40 +22,63 @@ VERIFY_MODEL_ID="${VERIFY_MODEL_ID:-openai.gpt-5.2-2025-12-11}"
 echo "[INFO] Gateway resources"
 kubectl --kubeconfig "$KUBECONFIG_PATH" -n "$K8S_GATEWAY_NAMESPACE" get pods,svc
 
-echo "[INFO] Verify /debug/api/sessions without token should be 401 or 403"
-kubectl --kubeconfig "$KUBECONFIG_PATH" -n "$K8S_GATEWAY_NAMESPACE" run gateway-curl-check \
-  --image=curlimages/curl:8.7.1 \
-  --restart=Never \
-  --rm -i \
-  --command -- sh -c "
-    code=\$(curl -s -o /dev/null -w '%{http_code}' http://${SERVICE_NAME}:8000/debug/api/sessions);
-    echo unauthorized_http_code=\$code;
-    test \"\$code\" = \"401\" -o \"\$code\" = \"403\";
-  "
+echo "[INFO] Verify gateway locally via port-forward (cluster admission blocks non-OCIR images)"
+
+echo "[INFO] Starting port-forward to service/${SERVICE_NAME} (127.0.0.1:8000)"
+kubectl --kubeconfig "$KUBECONFIG_PATH" -n "$K8S_GATEWAY_NAMESPACE" port-forward "svc/${SERVICE_NAME}" 18000:8000 >/tmp/gateway-portforward.log 2>&1 &
+PF_PID=$!
+cleanup_pf() {
+  kill "$PF_PID" >/dev/null 2>&1 || true
+}
+trap cleanup_pf EXIT
+sleep 2
+
+echo "[INFO] Verify /debug/api/sessions without token"
+# Accept:
+# - 401/403 when debug is enabled and bearer auth is enforced
+# - 404 when debug is disabled
+resp_file="/tmp/gateway-debug-sessions.json"
+code=$(curl -sS -o "$resp_file" -w '%{http_code}' http://127.0.0.1:18000/debug/api/sessions || true)
+echo "debug_http_code=$code"
+if [[ "$code" == "404" ]]; then
+  if grep -q "Debug UI is disabled" "$resp_file"; then
+    echo "[INFO] Debug UI disabled (expected)"
+  else
+    echo "[ERROR] /debug returned 404 but unexpected body:" >&2
+    head -c 400 "$resp_file" >&2; echo >&2
+    exit 1
+  fi
+elif [[ "$code" == "401" || "$code" == "403" ]]; then
+  echo "[INFO] Debug UI enabled and protected (expected)"
+else
+  echo "[ERROR] Unexpected /debug status: $code" >&2
+  head -c 400 "$resp_file" >&2; echo >&2
+  exit 1
+fi
 
 echo "[INFO] Verify /healthz"
-kubectl --kubeconfig "$KUBECONFIG_PATH" -n "$K8S_GATEWAY_NAMESPACE" run gateway-healthz-check \
-  --image=curlimages/curl:8.7.1 \
-  --restart=Never \
-  --rm -i \
-  --command -- sh -c "curl -sS http://${SERVICE_NAME}:8000/healthz"
+curl -sS http://127.0.0.1:18000/healthz
 
-echo "[INFO] Verify oc-app namespace can reach gateway service"
-kubectl --kubeconfig "$KUBECONFIG_PATH" -n "$K8S_OC_APP_NAMESPACE" run oc-app-to-gateway-healthz \
-  --image=curlimages/curl:8.7.1 \
-  --restart=Never \
-  --rm -i \
-  --command -- sh -c "curl -sS http://${SERVICE_NAME}.${K8S_GATEWAY_NAMESPACE}.svc.cluster.local:8000/healthz"
+echo "[INFO] Verify gateway /v1/messages (local, through port-forward)"
+curl -sS -X POST http://127.0.0.1:18000/v1/messages \
+  -H 'Content-Type: application/json' \
+  -H 'x-api-key: verify' \
+  -d '{"model":"'"${VERIFY_MODEL_ID}"'","max_tokens":8,"messages":[{"role":"user","content":"ping"}]}' | head -c 400
 
-echo "[INFO] Verify gateway /v1/messages from oc-app namespace"
-kubectl --kubeconfig "$KUBECONFIG_PATH" -n "$K8S_OC_APP_NAMESPACE" run oc-app-to-gateway-messages \
-  --image=curlimages/curl:8.7.1 \
-  --restart=Never \
-  --rm -i \
-  --command -- sh -c "
-    curl -sS -X POST http://${SERVICE_NAME}.${K8S_GATEWAY_NAMESPACE}.svc.cluster.local:8000/v1/messages \\
-      -H 'Content-Type: application/json' \\
-      -H 'x-api-key: verify' \\
-      -d '{\"model\":\"${VERIFY_MODEL_ID}\",\"max_tokens\":8,\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}]}' | head -c 400;
-    echo;
-  "
+echo
+
+echo "[INFO] OpenClaw resources"
+kubectl --kubeconfig "$KUBECONFIG_PATH" -n "$K8S_OPENCLAW_NAMESPACE" get pods,svc -o wide
+
+echo "[INFO] Verify OpenClaw /healthz and /readyz via port-forward"
+# Avoid creating ephemeral pods (cluster policies may block non-OCIR images or default SAs).
+PORT_FWD_OPENCLAW_LOG=/tmp/openclaw-portforward.log
+kubectl --kubeconfig "$KUBECONFIG_PATH" -n "$K8S_OPENCLAW_NAMESPACE" port-forward svc/openclaw 18789:18789 >"$PORT_FWD_OPENCLAW_LOG" 2>&1 &
+PF2_PID=$!
+cleanup_pf2() { kill "$PF2_PID" >/dev/null 2>&1 || true; }
+trap cleanup_pf2 EXIT
+sleep 2
+curl -sS http://127.0.0.1:18789/healthz
+echo
+curl -sS http://127.0.0.1:18789/readyz
+echo

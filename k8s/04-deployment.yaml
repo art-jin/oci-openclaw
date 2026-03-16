@@ -31,6 +31,8 @@ spec:
               value: INFO
             - name: OCI_RESOURCE_PRINCIPAL_VERSION
               value: "2.2"
+            - name: OCI_RESOURCE_PRINCIPAL_REGION
+              value: "__OCI_RESOURCE_PRINCIPAL_REGION__"
           envFrom:
             - secretRef:
                 name: gateway-debug-auth

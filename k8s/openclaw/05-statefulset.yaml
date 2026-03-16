@@ -1,0 +1,203 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: openclaw
+  namespace: openclaw-prod
+spec:
+  serviceName: openclaw-headless
+  replicas: 1
+  selector:
+    matchLabels:
+      app: openclaw
+  template:
+    metadata:
+      labels:
+        app: openclaw
+    spec:
+      serviceAccountName: openclaw-sa
+      automountServiceAccountToken: true
+      imagePullSecrets:
+        - name: ocir-cred
+      enableServiceLinks: false
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
+
+      initContainers:
+        - name: init-openclaw-config
+          image: python:3.12-alpine
+          imagePullPolicy: IfNotPresent
+          command:
+            - sh
+            - -lc
+            - |
+              set -eu
+
+              STATE_DIR=/home/node/.openclaw
+              WORKSPACE_DIR="${STATE_DIR}/workspace"
+              TOKEN_FILE="${STATE_DIR}/gateway-token"
+              CONFIG_FILE="${STATE_DIR}/openclaw.json"
+              TEMPLATE_FILE=/config/base-openclaw.json
+              APIKEY_FILE=/secrets/OPENCLAW_GATEWAY_API_KEY
+
+              mkdir -p "${WORKSPACE_DIR}"
+              umask 077
+
+              if [ -s "${TOKEN_FILE}" ]; then
+                TOKEN="$(cat "${TOKEN_FILE}")"
+              else
+                TOKEN="$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 48)"
+                printf '%s' "${TOKEN}" > "${TOKEN_FILE}"
+              fi
+
+              export TOKEN TEMPLATE_FILE APIKEY_FILE CONFIG_FILE
+
+              python3 <<'PY'
+              import json
+              import os
+              from pathlib import Path
+
+              template_file = Path(os.environ["TEMPLATE_FILE"])
+              apikey_file = Path(os.environ["APIKEY_FILE"])
+              config_file = Path(os.environ["CONFIG_FILE"])
+              token = os.environ["TOKEN"]
+
+              data = json.loads(template_file.read_text())
+              api_key = apikey_file.read_text().strip()
+
+              data.setdefault("gateway", {})
+              data["gateway"]["auth"] = {"mode": "token", "token": token}
+              data["gateway"]["remote"] = {"token": token}
+
+              data.setdefault("models", {}).setdefault("providers", {}).setdefault("oci-gateway", {})
+              data["models"]["providers"]["oci-gateway"]["apiKey"] = api_key
+
+              config_file.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n")
+              PY
+
+              chown -R 1000:1000 "${STATE_DIR}"
+              chmod 700 "${STATE_DIR}"
+              [ -f "${TOKEN_FILE}" ] && chmod 600 "${TOKEN_FILE}"
+              [ -f "${CONFIG_FILE}" ] && chmod 600 "${CONFIG_FILE}"
+          securityContext:
+            runAsUser: 0
+          volumeMounts:
+            - name: openclaw-data
+              mountPath: /home/node/.openclaw
+            - name: openclaw-config-template
+              mountPath: /config
+              readOnly: true
+            - name: openclaw-provider-secrets
+              mountPath: /secrets
+              readOnly: true
+
+      containers:
+        - name: gateway
+          image: __OPENCLAW_IMAGE__
+          imagePullPolicy: IfNotPresent
+          command:
+            - node
+            - dist/index.js
+            - gateway
+            - --bind
+            - lan
+            - --port
+            - "18789"
+          env:
+            - name: HOME
+              value: /home/node
+          ports:
+            - name: gateway
+              containerPort: 18789
+            - name: bridge
+              containerPort: 18790
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: gateway
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 24
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: gateway
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 5
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: gateway
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 5
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+            limits:
+              cpu: "2"
+              memory: 4Gi
+          volumeMounts:
+            - name: openclaw-data
+              mountPath: /home/node/.openclaw
+
+        - name: cli
+          image: __OPENCLAW_IMAGE__
+          imagePullPolicy: IfNotPresent
+          command:
+            - sh
+            - -lc
+            - sleep infinity
+          stdin: true
+          tty: true
+          env:
+            - name: HOME
+              value: /home/node
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 1Gi
+          volumeMounts:
+            - name: openclaw-data
+              mountPath: /home/node/.openclaw
+
+      volumes:
+        - name: openclaw-config-template
+          configMap:
+            name: openclaw-config-template
+        - name: openclaw-provider-secrets
+          secret:
+            secretName: openclaw-provider-secrets
+
+  volumeClaimTemplates:
+    - metadata:
+        name: openclaw-data
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        storageClassName: oci-bv
+        resources:
+          requests:
+            storage: 50Gi
