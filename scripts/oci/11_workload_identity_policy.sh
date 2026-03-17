@@ -19,6 +19,7 @@ shift || true
 ENV_FILE="scripts/oci/gateway.env"
 OCI_CLI_PROFILE="DEFAULT"
 OCI_REGION=""
+MODE="gateway-genai"
 POLICY_NAME="oke-gateway-workload-identity"
 POLICY_DESC="OKE workload identity policy for oci-anthropic-gateway"
 NAMESPACE="gateway-prod"
@@ -31,6 +32,10 @@ usage() {
 Usage:
   $0 <create|create-or-update|delete> --env path/to/gateway.env [options]
 
+Modes:
+  gateway-genai            (default) policy for gateway to call OCI GenAI
+  openclaw-objectstorage   policy for OpenClaw to manage Object Storage (buckets + objects only)
+
 Options:
   --env <file>              Env file to source (default: scripts/oci/gateway.env)
   --profile <name>          OCI CLI profile (default: DEFAULT or OCI_CLI_PROFILE from env)
@@ -39,6 +44,7 @@ Options:
   --cluster-id <ocid>       Override OKE cluster OCID (default: OCI_CLUSTER_OCID from env)
   --namespace <name>        Kubernetes namespace (default: gateway-prod)
   --service-account <name>  Kubernetes serviceaccount (default: oci-gateway-sa)
+  --mode <name>             Policy mode: gateway-genai|openclaw-objectstorage (default: gateway-genai)
   --policy-name <name>      Policy name (default: oke-gateway-workload-identity)
   --policy-desc <text>      Policy description
 EOF
@@ -67,6 +73,8 @@ while [[ $# -gt 0 ]]; do
       SERVICE_ACCOUNT="$2"; shift 2 ;;
     --policy-name)
       POLICY_NAME="$2"; shift 2 ;;
+    --mode)
+      MODE="$2"; shift 2 ;;
     --policy-desc)
       POLICY_DESC="$2"; shift 2 ;;
     -h|--help)
@@ -98,8 +106,20 @@ CLUSTER_OCID="${CLUSTER_OCID_OVERRIDE:-${OCI_CLUSTER_OCID:-}}"
 : "${COMPARTMENT_ID:?OCI_COMPARTMENT_OCID (or --compartment-id) is required}"
 : "${CLUSTER_OCID:?OCI_CLUSTER_OCID (or --cluster-id) is required}"
 
-STMT1="Allow any-user to inspect generative-ai-model in compartment id ${COMPARTMENT_ID} where all {request.principal.type='workload',request.principal.namespace='${NAMESPACE}',request.principal.service_account='${SERVICE_ACCOUNT}',request.principal.cluster_id='${CLUSTER_OCID}'}"
-STMT2="Allow any-user to use generative-ai-chat in compartment id ${COMPARTMENT_ID} where all {request.principal.type='workload',request.principal.namespace='${NAMESPACE}',request.principal.service_account='${SERVICE_ACCOUNT}',request.principal.cluster_id='${CLUSTER_OCID}'}"
+case "${MODE}" in
+  gateway-genai)
+    STMT1="Allow any-user to inspect generative-ai-model in compartment id ${COMPARTMENT_ID} where all {request.principal.type='workload',request.principal.namespace='${NAMESPACE}',request.principal.service_account='${SERVICE_ACCOUNT}',request.principal.cluster_id='${CLUSTER_OCID}'}"
+    STMT2="Allow any-user to use generative-ai-chat in compartment id ${COMPARTMENT_ID} where all {request.principal.type='workload',request.principal.namespace='${NAMESPACE}',request.principal.service_account='${SERVICE_ACCOUNT}',request.principal.cluster_id='${CLUSTER_OCID}'}"
+    ;;
+  openclaw-objectstorage)
+    STMT1="Allow any-user to manage buckets in compartment id ${COMPARTMENT_ID} where all {request.principal.type='workload',request.principal.namespace='${NAMESPACE}',request.principal.service_account='${SERVICE_ACCOUNT}',request.principal.cluster_id='${CLUSTER_OCID}'}"
+    STMT2="Allow any-user to manage objects in compartment id ${COMPARTMENT_ID} where all {request.principal.type='workload',request.principal.namespace='${NAMESPACE}',request.principal.service_account='${SERVICE_ACCOUNT}',request.principal.cluster_id='${CLUSTER_OCID}'}"
+    ;;
+  *)
+    echo "[ERROR] Unknown mode: ${MODE}" >&2
+    exit 1
+    ;;
+esac
 
 REGION_ARGS=()
 # IAM (Identity) CREATE/UPDATE/DELETE must be executed in the tenancy Home Region.
@@ -167,17 +187,23 @@ case "$ACTION" in
     if [[ -n "$POLICY_ID" ]]; then
       echo "[INFO] Policy exists. Updating: $POLICY_ID"
       VERSION_DATE_YMD="$(lookup_policy_version_date_ymd "$POLICY_ID")"
-      if [[ -z "$VERSION_DATE_YMD" ]]; then
-        echo "[ERROR] Failed to lookup policy version-date for: $POLICY_ID" >&2
-        exit 1
+      if [[ -n "$VERSION_DATE_YMD" ]]; then
+        oci iam policy update \
+          --policy-id "$POLICY_ID" \
+          --version-date "$VERSION_DATE_YMD" \
+          --statements "[\"$STMT1\",\"$STMT2\"]" \
+          --force \
+          "${REGION_ARGS[@]}" \
+          "${PROFILE_ARGS[@]}"
+      else
+        echo "[WARN] Policy version-date is null; updating without --version-date: $POLICY_ID" >&2
+        oci iam policy update \
+          --policy-id "$POLICY_ID" \
+          --statements "[\"$STMT1\",\"$STMT2\"]" \
+          --force \
+          "${REGION_ARGS[@]}" \
+          "${PROFILE_ARGS[@]}"
       fi
-      oci iam policy update \
-        --policy-id "$POLICY_ID" \
-        --version-date "$VERSION_DATE_YMD" \
-        --statements "[\"$STMT1\",\"$STMT2\"]" \
-        --force \
-        "${REGION_ARGS[@]}" \
-        "${PROFILE_ARGS[@]}"
       echo "[INFO] Updated policy: $POLICY_ID"
     else
       echo "[INFO] Policy not found. Creating '${POLICY_NAME}'"

@@ -44,6 +44,7 @@ set +a
 : "${OCI_REGION:?OCI_REGION is required}"
 : "${OCI_CLUSTER_OCID:?OCI_CLUSTER_OCID is required}"
 : "${OCI_COMPARTMENT_OCID:?OCI_COMPARTMENT_OCID is required}"
+OCI_ARTIFACTS_COMPARTMENT_OCID="${OCI_ARTIFACTS_COMPARTMENT_OCID:-$OCI_COMPARTMENT_OCID}"
 : "${DEBUG_UI_AUTH_TOKEN:?DEBUG_UI_AUTH_TOKEN is required}"
 : "${GATEWAY_CONFIG_JSON_FILE:?GATEWAY_CONFIG_JSON_FILE is required}"
 
@@ -219,14 +220,14 @@ build_and_push_image_if_needed() {
     # Note: OCI CLI does not consistently support "repository get by name" across versions.
     # Use list+filter to determine existence.
     if oci artifacts container repository list \
-      --compartment-id "$OCI_COMPARTMENT_OCID" \
+      --compartment-id "$OCI_ARTIFACTS_COMPARTMENT_OCID" \
       --region "$OCI_REGION" \
       --profile "${OCI_CLI_PROFILE:-DEFAULT}" \
       --all \
       --query "length(data[?\"display-name\"=='${OCIR_NAMESPACE}/${OCIR_REPO}'])" \
       --raw-output 2>/dev/null | grep -qx "0"; then
       run_cmd "oci artifacts container repository create \
-        --compartment-id \"$OCI_COMPARTMENT_OCID\" \
+        --compartment-id \"$OCI_ARTIFACTS_COMPARTMENT_OCID\" \
         --display-name \"${OCIR_REPO}\" \
         --is-immutable false \
         --region \"$OCI_REGION\" \
@@ -235,7 +236,7 @@ build_and_push_image_if_needed() {
       echo "[INFO] OCIR repository exists: ${OCIR_NAMESPACE}/${OCIR_REPO}"
     fi
   else
-    echo "+ oci artifacts container repository list --compartment-id \"$OCI_COMPARTMENT_OCID\" --all ... (filter display-name == ${OCIR_NAMESPACE}/${OCIR_REPO})"
+    echo "+ oci artifacts container repository list --compartment-id \"$OCI_ARTIFACTS_COMPARTMENT_OCID\" --all ... (filter display-name == ${OCIR_NAMESPACE}/${OCIR_REPO})"
     echo "+ (if not exists) oci artifacts container repository create --display-name \"${OCIR_REPO}\" ..."
   fi
 

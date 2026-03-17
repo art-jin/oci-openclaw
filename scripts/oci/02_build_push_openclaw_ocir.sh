@@ -29,6 +29,7 @@ set +a
 
 : "${OCI_REGION:?OCI_REGION is required}"
 : "${OCI_COMPARTMENT_OCID:?OCI_COMPARTMENT_OCID is required}"
+OCI_ARTIFACTS_COMPARTMENT_OCID="${OCI_ARTIFACTS_COMPARTMENT_OCID:-$OCI_COMPARTMENT_OCID}"
 : "${OCIR_REGION_KEY:?OCIR_REGION_KEY is required}"
 : "${OCI_USERNAME:?OCI_USERNAME is required}"
 : "${OCI_AUTH_TOKEN:?OCI_AUTH_TOKEN is required}"
@@ -74,14 +75,14 @@ if [[ "$APPLY" -eq 1 ]]; then
   # Note: OCI CLI does not consistently support "repository get by name" across versions.
   # Use list+filter to determine existence.
   if oci artifacts container repository list \
-    --compartment-id "$OCI_COMPARTMENT_OCID" \
+    --compartment-id "$OCI_ARTIFACTS_COMPARTMENT_OCID" \
     --region "$OCI_REGION" \
     --profile "${OCI_CLI_PROFILE:-DEFAULT}" \
     --all \
     --query "length(data[?\"display-name\"=='${OCIR_NAMESPACE}/${OPENCLAW_OCIR_REPO}'])" \
     --raw-output 2>/dev/null | grep -qx "0"; then
     run_cmd "oci artifacts container repository create \
-      --compartment-id \"$OCI_COMPARTMENT_OCID\" \
+      --compartment-id \"$OCI_ARTIFACTS_COMPARTMENT_OCID\" \
       --display-name \"${OPENCLAW_OCIR_REPO}\" \
       --is-immutable false \
       --region \"$OCI_REGION\" \
@@ -90,7 +91,7 @@ if [[ "$APPLY" -eq 1 ]]; then
     echo "[INFO] OCIR repository exists: ${OCIR_NAMESPACE}/${OPENCLAW_OCIR_REPO}"
   fi
 else
-  echo "+ oci artifacts container repository list --compartment-id \"$OCI_COMPARTMENT_OCID\" --all ... (filter display-name == ${OCIR_NAMESPACE}/${OPENCLAW_OCIR_REPO})" >&2
+  echo "+ oci artifacts container repository list --compartment-id \"$OCI_ARTIFACTS_COMPARTMENT_OCID\" --all ... (filter display-name == ${OCIR_NAMESPACE}/${OPENCLAW_OCIR_REPO})" >&2
   echo "+ (if not exists) oci artifacts container repository create --display-name \"${OPENCLAW_OCIR_REPO}\" ..." >&2
 fi
 

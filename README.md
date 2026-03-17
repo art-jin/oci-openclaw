@@ -95,6 +95,25 @@ local-docker目录用于在本地 Docker Desktop 环境中部署 OpenClaw + OCI 
 cp scripts/oci/gateway.env.example scripts/oci/gateway.env
 vi scripts/oci/gateway.env
 ```
+
+#### 0.1 OCIR（镜像仓库）说明：namespace ≠ compartment
+
+- OCIR 镜像地址格式：`<regionKey>.ocir.io/<tenancyNamespace>/<repo>:<tag>`
+  - 其中 `<tenancyNamespace>`（例如 `sehubjapacprod`，可由 `oci os ns get` 得到）**不是** IAM compartment。
+- OCIR 的 Repository/Images 在 OCI 侧是按 **compartment OCID** 归属的。
+  - 本项目新增 `OCI_ARTIFACTS_COMPARTMENT_OCID` 用于控制“container images 所在 compartment”。
+  - 若不设置，则默认等于 `OCI_COMPARTMENT_OCID`。
+
+验证（列出目标 compartment 下的 OCIR repositories）：
+
+```bash
+oci artifacts container repository list \
+  --compartment-id "$OCI_ARTIFACTS_COMPARTMENT_OCID" \
+  --region "$OCI_REGION" \
+  --profile "${OCI_CLI_PROFILE:-DEFAULT}" \
+  --all
+```
+
 ### 0.5 先准备模型配置（必做）
 
 ```bash
