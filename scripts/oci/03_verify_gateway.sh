@@ -17,7 +17,7 @@ K8S_OC_APP_NAMESPACE="${K8S_OC_APP_NAMESPACE:-oc-app-prod}"
 K8S_OPENCLAW_NAMESPACE="${K8S_OPENCLAW_NAMESPACE:-openclaw-prod}"
 KUBECONFIG_PATH="${KUBECONFIG_PATH:-$HOME/.kube/config}"
 SERVICE_NAME="${SERVICE_NAME:-oci-anthropic-gateway}"
-VERIFY_MODEL_ID="${VERIFY_MODEL_ID:-openai.gpt-5.2-2025-12-11}"
+VERIFY_MODEL_ID="${VERIFY_MODEL_ID:-openai.gpt-oss-20b}"
 
 echo "[INFO] Gateway resources"
 kubectl --kubeconfig "$KUBECONFIG_PATH" -n "$K8S_GATEWAY_NAMESPACE" get pods,svc

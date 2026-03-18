@@ -105,14 +105,14 @@ key_file=/root/.oci/oci_api_key.pem
   "endpoint": "https://inference.generativeai.us-chicago-1.oci.oraclecloud.com",
 
   "model_definitions": {
-    "openai.gpt-5.2-2025-12-11": {
+    "openai.gpt-oss-20b": {
       "ocid": "ocid1.generativeaimodel.oc1.us-chicago-1.YOUR_MODEL_OCID",
       "max_tokens_key": "max_completion_tokens",
       "temperature": 1.0
     }
   },
 
-  "default_model": "openai.gpt-5.2-2025-12-11"
+  "default_model": "openai.gpt-oss-20b"
 }
 ```
 
@@ -136,7 +136,7 @@ key_file=/root/.oci/oci_api_key.pem
         "api": "anthropic-messages",
         "models": [
           {
-            "id": "openai.gpt-5.2-2025-12-11",
+            "id": "openai.gpt-oss-20b",
             "name": "GPT 5.2 (OCI)",
             "contextWindow": 200000,
             "maxTokens": 8192
@@ -148,7 +148,7 @@ key_file=/root/.oci/oci_api_key.pem
   "agents": {
     "defaults": {
       "model": {
-        "primary": "oci-gateway/openai.gpt-5.2-2025-12-11"
+        "primary": "oci-gateway/openai.gpt-oss-20b"
       }
     }
   },
@@ -195,7 +195,7 @@ curl http://localhost:8000/debug/
 curl -X POST http://localhost:8000/v1/messages \
   -H "Content-Type: application/json" \
   -H "x-api-key: test" \
-  -d '{"model":"openai.gpt-5.2-2025-12-11","max_tokens":10,"messages":[{"role":"user","content":"hi"}]}'
+  -d '{"model":"openai.gpt-oss-20b","max_tokens":10,"messages":[{"role":"user","content":"hi"}]}'
 
 # 检查 OpenClaw 日志
 docker compose logs openclaw --tail=50
@@ -344,7 +344,7 @@ docker compose exec openclaw node dist/index.js devices approve <device-uuid> --
         "api": "anthropic-messages",
         "models": [
           {
-            "id": "openai.gpt-5.2-2025-12-11",
+            "id": "openai.gpt-oss-20b",
             "name": "GPT 5.2 (OCI)",
             "contextWindow": 200000,
             "maxTokens": 8192
@@ -356,7 +356,7 @@ docker compose exec openclaw node dist/index.js devices approve <device-uuid> --
   "agents": {
     "defaults": {
       "model": {
-        "primary": "oci-gateway/openai.gpt-5.2-2025-12-11"
+        "primary": "oci-gateway/openai.gpt-oss-20b"
       }
     },
     "list": [

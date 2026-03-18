@@ -2,21 +2,11 @@
   "compartment_id": "ocid1.compartment.oc1..your-compartment-id",
   "endpoint": "https://inference.generativeai.us-chicago-1.oci.oraclecloud.com",
   "model_aliases": {
-    "claude-haiku-4-5": "xai.grok-4-fast-non-reasoning",
-    "claude-3-5-sonnet": "xai.grok-4-fast-non-reasoning",
-    "claude-3-haiku": "xai.grok-4-fast-non-reasoning"
+    "claude-haiku-4-5": "openai.gpt-oss-20b",
+    "claude-3-5-sonnet": "openai.gpt-oss-20b",
+    "claude-3-haiku": "openai.gpt-oss-20b"
   },
   "model_definitions": {
-    "xai.grok-4-fast-non-reasoning": {
-      "ocid": "ocid1.generativeaimodel.oc1.us-chicago-1.your-model-ocid",
-      "max_tokens_key": "max_tokens",
-      "temperature": 0.7
-    },
-    "xai.grok-4-fast-reasoning": {
-      "ocid": "ocid1.generativeaimodel.oc1.us-chicago-1.your-model-ocid",
-      "max_tokens_key": "max_tokens",
-      "temperature": 0.7
-    },
     "xai.grok-code-fast-1": {
       "ocid": "ocid1.generativeaimodel.oc1.us-chicago-1.your-model-ocid",
       "max_tokens_key": "max_tokens",

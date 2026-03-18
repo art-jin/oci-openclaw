@@ -1,6 +1,6 @@
 # oci-openclaw-cli-plan 执行记录（Exec Log）
 
-> 目的：记录 `oci-openclaw-cli-plan.md` 的实际执行进度与关键产物，便于中断后从正确位置继续。
+> 目的：记录 `docs/archive/oci-openclaw-cli-plan.md` 的实际执行进度与关键产物，便于中断后从正确位置继续。
 >
 > 路径选择：**路径 A（OKE Workload Identity for Pods / Resource Principal）**
 >

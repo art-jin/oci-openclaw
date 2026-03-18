@@ -192,6 +192,28 @@ ensure_ocir_namespace() {
   fi
 }
 
+assert_image_exists() {
+  local image_ref="$1"
+
+  if ! command -v docker >/dev/null 2>&1; then
+    echo "[ERROR] docker is required to verify that OPENCLAW_IMAGE exists (docker manifest inspect)." >&2
+    echo "[ERROR] Either install docker, set OPENCLAW_IMAGE_MODE=build, or ensure the image exists in registry: $image_ref" >&2
+    exit 1
+  fi
+
+  # This checks for manifest existence without pulling layers.
+  if ! docker manifest inspect "$image_ref" >/dev/null 2>&1; then
+    echo "[ERROR] OPENCLAW_IMAGE does not exist or is not accessible: $image_ref" >&2
+    echo "[ERROR] Fix by either:" >&2
+    echo "  - Set OPENCLAW_IMAGE_MODE=build to auto build+push" >&2
+    echo "  - Or push the image and/or correct OPENCLAW_IMAGE" >&2
+    echo "  - Or docker login to the registry (e.g., ${OCIR_REGION_KEY:-<regionKey>}.ocir.io)" >&2
+    exit 1
+  fi
+
+  echo "[INFO] OpenClaw image exists: $image_ref"
+}
+
 build_and_push_image_if_needed() {
   if [[ "$GATEWAY_IMAGE_MODE" == "prebuilt" ]]; then
     : "${GATEWAY_IMAGE:?GATEWAY_IMAGE is required when GATEWAY_IMAGE_MODE=prebuilt}"
@@ -289,19 +311,23 @@ deploy_openclaw_if_requested() {
     return
   fi
 
-  # If image is not explicitly set, optionally build/push OpenClaw to OCIR.
-  if [[ -z "${OPENCLAW_IMAGE:-}" && "${OPENCLAW_IMAGE_MODE:-}" == "build" ]]; then
-    echo "[INFO] OPENCLAW_IMAGE is empty and OPENCLAW_IMAGE_MODE=build; building/pushing OpenClaw to OCIR"
+  # If requested, build/push OpenClaw to OCIR and use the resulting image reference.
+  if [[ "${OPENCLAW_IMAGE_MODE:-}" == "build" ]]; then
+    echo "[INFO] OPENCLAW_IMAGE_MODE=build; building/pushing OpenClaw to OCIR"
     if [[ "$APPLY" -eq 1 ]]; then
       OPENCLAW_IMAGE="$(bash scripts/oci/02_build_push_openclaw_ocir.sh "$ENV_FILE" --apply | tail -n 1)"
     else
       OPENCLAW_IMAGE="$(bash scripts/oci/02_build_push_openclaw_ocir.sh "$ENV_FILE" | tail -n 1)"
     fi
     echo "[INFO] OpenClaw image: ${OPENCLAW_IMAGE}"
-
   fi
 
   : "${OPENCLAW_IMAGE:?OPENCLAW_IMAGE is required when --deploy-openclaw is set}"
+
+  # Fail fast: if we're not building OpenClaw, verify the image exists before creating workloads.
+  if [[ "${OPENCLAW_IMAGE_MODE:-}" != "build" && "$APPLY" -eq 1 ]]; then
+    assert_image_exists "$OPENCLAW_IMAGE"
+  fi
 
   ensure_dir_exists "$OPENCLAW_MANIFEST_DIR"
 
@@ -354,7 +380,13 @@ deploy_openclaw_if_requested() {
   run_cmd "kubectl --kubeconfig \"$KUBECONFIG_PATH\" apply -f \"$np_egress_out\""
   run_cmd "kubectl --kubeconfig \"$KUBECONFIG_PATH\" apply -f \"$sts_out\""
 
-  run_cmd "kubectl --kubeconfig \"$KUBECONFIG_PATH\" -n \"$K8S_OPENCLAW_NAMESPACE\" rollout status statefulset/openclaw --timeout=600s"
+  if ! run_cmd "kubectl --kubeconfig \"$KUBECONFIG_PATH\" -n \"$K8S_OPENCLAW_NAMESPACE\" rollout status statefulset/openclaw --timeout=600s"; then
+    run_cmd "kubectl --kubeconfig \"$KUBECONFIG_PATH\" -n \"$K8S_OPENCLAW_NAMESPACE\" get pods -o wide"
+    run_cmd "kubectl --kubeconfig \"$KUBECONFIG_PATH\" -n \"$K8S_OPENCLAW_NAMESPACE\" describe pod openclaw-0 || true"
+    run_cmd "kubectl --kubeconfig \"$KUBECONFIG_PATH\" -n \"$K8S_OPENCLAW_NAMESPACE\" get events --sort-by=.lastTimestamp | tail -n 60 || true"
+    exit 1
+  fi
+
   run_cmd "kubectl --kubeconfig \"$KUBECONFIG_PATH\" -n \"$K8S_OPENCLAW_NAMESPACE\" get pods,svc -o wide"
 
   run_cmd "rm -rf \"$tmp_dir\""
