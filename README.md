@@ -16,6 +16,18 @@ Admin -> VPN/Bastion -> gateway /debug (Bearer Token)
 ### 1.2 实现架构（ASCII 图，含端口转发访问路径）
 
 ```text
+(External access: no LoadBalancer)
+
+Mac Browser/Terminal
+  │  http://127.0.0.1:18789
+  │
+  ├─ ssh -L 18789:127.0.0.1:18789 <user>@<oci-vm>
+  │
+OCI VM (bastion/admin)
+  │  kubectl -n openclaw-prod port-forward svc/openclaw 18789:18789
+  │
+  └─ forwards to ClusterIP svc/openclaw:18789 → openclaw Pod
+                         │
                   (Cluster: OCI OKE)
 ┌───────────────────────────────────────────────────────────────────────────┐
 │                                                                           │
@@ -41,17 +53,6 @@ Admin -> VPN/Bastion -> gateway /debug (Bearer Token)
 │                                                                           │
 └───────────────────────────────────────────────────────────────────────────┘
 
-(External access: no LoadBalancer)
-
-Mac Browser/Terminal
-  │  http://127.0.0.1:18789
-  │
-  ├─ ssh -L 18789:127.0.0.1:18789 <user>@<oci-vm>
-  │
-OCI VM (bastion/admin)
-  │  kubectl -n openclaw-prod port-forward svc/openclaw 18789:18789
-  │
-  └─ forwards to ClusterIP svc/openclaw:18789 → openclaw Pod
 ```
 
 ## 2. 快速开始
