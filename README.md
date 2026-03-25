@@ -19,10 +19,10 @@ Admin -> VPN/Bastion -> gateway /debug (Bearer Token)
 Mac Browser/Terminal
   |  http://127.0.0.1:18789
   |
-  +-- ssh -L 18789:127.0.0.1:18789 <user>@<oci-vm>
+  +-- ssh -L 18789:127.0.0.1:18789 <user>@<oci-vm>                  (2.4-2)
   |
 OCI VM (bastion/admin)
-  |  kubectl -n openclaw-prod port-forward svc/openclaw 18789:18789
+  |  kubectl -n openclaw-prod port-forward svc/openclaw 18789:18789 (2.4-1)
   |
   +-- forwards to ClusterIP svc/openclaw:18789 -> openclaw Pod
                          |
