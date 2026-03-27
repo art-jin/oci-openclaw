@@ -107,6 +107,10 @@ spec:
           env:
             - name: HOME
               value: /home/node
+            - name: OCI_RESOURCE_PRINCIPAL_VERSION
+              value: "2.2"
+            - name: OCI_RESOURCE_PRINCIPAL_REGION
+              value: "us-chicago-1"
           ports:
             - name: gateway
               containerPort: 18789
@@ -164,6 +168,10 @@ spec:
           env:
             - name: HOME
               value: /home/node
+            - name: OCI_RESOURCE_PRINCIPAL_VERSION
+              value: "2.2"
+            - name: OCI_RESOURCE_PRINCIPAL_REGION
+              value: "us-chicago-1"
           securityContext:
             runAsNonRoot: true
             runAsUser: 1000
