@@ -64,11 +64,24 @@ OPENCLAW_MANIFEST_DIR="${OPENCLAW_MANIFEST_DIR:-k8s/openclaw}"
 OPENCLAW_IMAGE="${OPENCLAW_IMAGE:-}"
 OPENCLAW_GATEWAY_BASE_URL="${OPENCLAW_GATEWAY_BASE_URL:-http://oci-anthropic-gateway.${K8S_GATEWAY_NAMESPACE}.svc.cluster.local:8000}"
 OPENCLAW_GATEWAY_API_KEY="${OPENCLAW_GATEWAY_API_KEY:-any-value-works}"
-OPENCLAW_OCI_CLI_AUTH_MODE="${OPENCLAW_OCI_CLI_AUTH_MODE:-instance_principal}"
+OPENCLAW_OCI_CLI_AUTH_MODE="${OPENCLAW_OCI_CLI_AUTH_MODE:-oke_workload_identity}"
+OPENCLAW_MOUNT_KUBECONFIG="${OPENCLAW_MOUNT_KUBECONFIG:-0}"
+OPENCLAW_KUBECONFIG_FILE="${OPENCLAW_KUBECONFIG_FILE:-}"
+OPENCLAW_KUBECONFIG_SECRET_NAME="${OPENCLAW_KUBECONFIG_SECRET_NAME:-openclaw-kubeconfig}"
 KUBECONFIG_PATH="${KUBECONFIG_PATH:-$HOME/.kube/config}"
 
-if [[ "$OPENCLAW_OCI_CLI_AUTH_MODE" != "instance_principal" && "$OPENCLAW_OCI_CLI_AUTH_MODE" != "explicit" ]]; then
-  echo "[ERROR] OPENCLAW_OCI_CLI_AUTH_MODE must be instance_principal or explicit" >&2
+if [[ "$OPENCLAW_OCI_CLI_AUTH_MODE" != "oke_workload_identity" && "$OPENCLAW_OCI_CLI_AUTH_MODE" != "instance_principal" && "$OPENCLAW_OCI_CLI_AUTH_MODE" != "explicit" ]]; then
+  echo "[ERROR] OPENCLAW_OCI_CLI_AUTH_MODE must be oke_workload_identity, instance_principal, or explicit" >&2
+  exit 1
+fi
+
+if [[ "$OPENCLAW_MOUNT_KUBECONFIG" != "0" && "$OPENCLAW_MOUNT_KUBECONFIG" != "1" ]]; then
+  echo "[ERROR] OPENCLAW_MOUNT_KUBECONFIG must be 0 or 1" >&2
+  exit 1
+fi
+
+if [[ "$OPENCLAW_MOUNT_KUBECONFIG" == "1" && -z "$OPENCLAW_KUBECONFIG_FILE" ]]; then
+  echo "[ERROR] OPENCLAW_KUBECONFIG_FILE is required when OPENCLAW_MOUNT_KUBECONFIG=1" >&2
   exit 1
 fi
 
@@ -278,7 +291,7 @@ render_manifest() {
   local out="$2"
 
   # Escape replacement strings for sed (at least '&' which otherwise expands to the matched text).
-  local image_esc oc_app_image_esc rp_region_esc openclaw_image_esc openclaw_base_url_esc openclaw_api_key_esc openclaw_oci_cli_auth_mode_esc
+  local image_esc oc_app_image_esc rp_region_esc openclaw_image_esc openclaw_base_url_esc openclaw_api_key_esc openclaw_oci_cli_auth_mode_esc openclaw_mount_kubeconfig_esc openclaw_kubeconfig_secret_name_esc
   image_esc="${IMAGE_FULL//&/\\&}"
   oc_app_image_esc="${OC_APP_IMAGE//&/\\&}"
   rp_region_esc="${OCI_RESOURCE_PRINCIPAL_REGION//&/\\&}"
@@ -286,6 +299,8 @@ render_manifest() {
   openclaw_base_url_esc="${OPENCLAW_GATEWAY_BASE_URL//&/\\&}"
   openclaw_api_key_esc="${OPENCLAW_GATEWAY_API_KEY//&/\\&}"
   openclaw_oci_cli_auth_mode_esc="${OPENCLAW_OCI_CLI_AUTH_MODE//&/\\&}"
+  openclaw_mount_kubeconfig_esc="${OPENCLAW_MOUNT_KUBECONFIG//&/\\&}"
+  openclaw_kubeconfig_secret_name_esc="${OPENCLAW_KUBECONFIG_SECRET_NAME//&/\\&}"
 
   sed \
     -e "s#namespace: gateway-prod#namespace: ${K8S_GATEWAY_NAMESPACE}#g" \
@@ -300,6 +315,8 @@ render_manifest() {
     -e "s#__OPENCLAW_GATEWAY_BASE_URL__#${openclaw_base_url_esc//\//\\/}#g" \
     -e "s#__OPENCLAW_GATEWAY_API_KEY__#${openclaw_api_key_esc//\//\\/}#g" \
     -e "s#__OPENCLAW_OCI_CLI_AUTH_MODE__#${openclaw_oci_cli_auth_mode_esc//\//\\/}#g" \
+    -e "s#__OPENCLAW_MOUNT_KUBECONFIG__#${openclaw_mount_kubeconfig_esc//\//\\/}#g" \
+    -e "s#__OPENCLAW_KUBECONFIG_SECRET_NAME__#${openclaw_kubeconfig_secret_name_esc//\//\\/}#g" \
     -e "s#__OPENCLAW_PUBLIC_EXPOSE__#0#g" \
     "$src" > "$out"
 }
@@ -359,6 +376,7 @@ deploy_openclaw_if_requested() {
 
   echo "[INFO] Deploying openclaw manifests from: $OPENCLAW_MANIFEST_DIR"
   echo "[INFO] OpenClaw OCI CLI auth mode: $OPENCLAW_OCI_CLI_AUTH_MODE"
+  echo "[INFO] OpenClaw kubeconfig mount: $OPENCLAW_MOUNT_KUBECONFIG"
 
   local tmp_dir
   tmp_dir="$(mktemp -d)"
@@ -382,6 +400,10 @@ deploy_openclaw_if_requested() {
 
   run_cmd "kubectl --kubeconfig \"$KUBECONFIG_PATH\" apply -f \"$ns_out\""
   run_cmd "kubectl --kubeconfig \"$KUBECONFIG_PATH\" apply -f \"$sa_out\""
+  if [[ "$OPENCLAW_MOUNT_KUBECONFIG" == "1" ]]; then
+    ensure_file_exists "$OPENCLAW_KUBECONFIG_FILE"
+    run_cmd "kubectl --kubeconfig \"$KUBECONFIG_PATH\" -n \"$K8S_OPENCLAW_NAMESPACE\" create secret generic \"$OPENCLAW_KUBECONFIG_SECRET_NAME\" --from-file=config=\"$OPENCLAW_KUBECONFIG_FILE\" --dry-run=client -o yaml | kubectl --kubeconfig \"$KUBECONFIG_PATH\" apply -f -"
+  fi
   run_cmd "kubectl --kubeconfig \"$KUBECONFIG_PATH\" apply -f \"$cm_out\""
   run_cmd "kubectl --kubeconfig \"$KUBECONFIG_PATH\" apply -f \"$secret_out\""
   run_cmd "kubectl --kubeconfig \"$KUBECONFIG_PATH\" apply -f \"$headless_svc_out\""

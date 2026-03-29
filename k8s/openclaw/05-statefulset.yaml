@@ -85,6 +85,9 @@ spec:
           volumeMounts:
             - name: openclaw-data
               mountPath: /home/node/.openclaw
+            - name: openclaw-kubeconfig
+              mountPath: /home/node/.kube
+              readOnly: true
             - name: openclaw-config-template
               mountPath: /config
               readOnly: true
@@ -115,6 +118,10 @@ spec:
               value: "us-chicago-1"
             - name: OPENCLAW_OCI_CLI_AUTH_MODE
               value: "__OPENCLAW_OCI_CLI_AUTH_MODE__"
+            - name: OCI_CLI_AUTH
+              value: "__OPENCLAW_OCI_CLI_AUTH_MODE__"
+            - name: KUBECONFIG
+              value: /home/node/.kube/config
           ports:
             - name: gateway
               containerPort: 18789
@@ -159,6 +166,9 @@ spec:
           volumeMounts:
             - name: openclaw-data
               mountPath: /home/node/.openclaw
+            - name: openclaw-kubeconfig
+              mountPath: /home/node/.kube
+              readOnly: true
           lifecycle:
             postStart:
               exec:
@@ -183,8 +193,8 @@ spec:
                     #!/bin/sh
                     set -eu
                     REAL_OCI="__OPENCLAW_OCI_REAL_BIN__"
-                    AUTH_MODE="${OPENCLAW_OCI_CLI_AUTH_MODE:-instance_principal}"
-                    if [ "$AUTH_MODE" != "instance_principal" ]; then
+                    AUTH_MODE="${OPENCLAW_OCI_CLI_AUTH_MODE:-oke_workload_identity}"
+                    if [ "$AUTH_MODE" = "explicit" ]; then
                       exec "$REAL_OCI" "$@"
                     fi
                     prev_was_auth=0
@@ -196,7 +206,7 @@ spec:
                         prev_was_auth=1
                       fi
                     done
-                    exec "$REAL_OCI" "$@" --auth instance_principal
+                    exec "$REAL_OCI" "$@" --auth "$AUTH_MODE"
                     EOF
                     sed -i "s#__OPENCLAW_OCI_REAL_BIN__#$REAL_OCI#g" "$BIN_DIR/oci"
                     chmod 755 "$BIN_DIR/oci"
@@ -222,6 +232,10 @@ spec:
               value: "us-chicago-1"
             - name: OPENCLAW_OCI_CLI_AUTH_MODE
               value: "__OPENCLAW_OCI_CLI_AUTH_MODE__"
+            - name: OCI_CLI_AUTH
+              value: "__OPENCLAW_OCI_CLI_AUTH_MODE__"
+            - name: KUBECONFIG
+              value: /home/node/.kube/config
           securityContext:
             runAsNonRoot: true
             runAsUser: 1000
@@ -240,6 +254,9 @@ spec:
           volumeMounts:
             - name: openclaw-data
               mountPath: /home/node/.openclaw
+            - name: openclaw-kubeconfig
+              mountPath: /home/node/.kube
+              readOnly: true
           lifecycle:
             postStart:
               exec:
@@ -264,8 +281,8 @@ spec:
                     #!/bin/sh
                     set -eu
                     REAL_OCI="__OPENCLAW_OCI_REAL_BIN__"
-                    AUTH_MODE="${OPENCLAW_OCI_CLI_AUTH_MODE:-instance_principal}"
-                    if [ "$AUTH_MODE" != "instance_principal" ]; then
+                    AUTH_MODE="${OPENCLAW_OCI_CLI_AUTH_MODE:-oke_workload_identity}"
+                    if [ "$AUTH_MODE" = "explicit" ]; then
                       exec "$REAL_OCI" "$@"
                     fi
                     prev_was_auth=0
@@ -277,7 +294,7 @@ spec:
                         prev_was_auth=1
                       fi
                     done
-                    exec "$REAL_OCI" "$@" --auth instance_principal
+                    exec "$REAL_OCI" "$@" --auth "$AUTH_MODE"
                     EOF
                     sed -i "s#__OPENCLAW_OCI_REAL_BIN__#$REAL_OCI#g" "$BIN_DIR/oci"
                     chmod 755 "$BIN_DIR/oci"
@@ -290,6 +307,10 @@ spec:
         - name: openclaw-provider-secrets
           secret:
             secretName: openclaw-provider-secrets
+        - name: openclaw-kubeconfig
+          secret:
+            secretName: __OPENCLAW_KUBECONFIG_SECRET_NAME__
+            optional: true
 
   volumeClaimTemplates:
     - metadata:

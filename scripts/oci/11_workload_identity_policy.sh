@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Manage OCI IAM Policy for OKE Workload Identity used by oci-anthropic-gateway.
+# Manage OCI IAM Policy for OKE Workload Identity used by oci-anthropic-gateway and OpenClaw OCI CLI.
 #
 # Usage:
 #   bash scripts/oci/11_workload_identity_policy.sh create-or-update --env scripts/oci/gateway.env
@@ -39,7 +39,7 @@ Usage:
 Modes:
   all                      (default) create/update both gateway GenAI and OpenClaw Object Storage statements together
   gateway-genai            policy for gateway to call OCI GenAI only
-  openclaw-objectstorage   policy for OpenClaw to manage Object Storage (buckets + objects only)
+  openclaw-objectstorage   policy for OpenClaw pod-based OKE workload identity to manage Object Storage (buckets + objects only)
 
 Options:
   --env <file>              Env file to source (default: scripts/oci/gateway.env)

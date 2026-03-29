@@ -144,30 +144,40 @@ bash scripts/oci/04_cleanup_gateway_oke.sh --env scripts/oci/gateway.env --apply
 
 ## 4. OpenClaw OCI CLI authentication notes
 
-- Gateway and OpenClaw are now documented as two separate OCI access paths:
+- Gateway and OpenClaw use separate OCI access paths:
   - gateway: OKE Workload Identity / OCI SDK path
-  - openclaw pod OCI CLI: instance principal path for current cluster experiments
+  - openclaw pod OCI CLI: `oke_workload_identity` by default
 - `scripts/oci/gateway.env` supports:
-  - `OPENCLAW_OCI_CLI_AUTH_MODE=instance_principal`
+  - `OPENCLAW_OCI_CLI_AUTH_MODE=oke_workload_identity` (default)
+  - `OPENCLAW_OCI_CLI_AUTH_MODE=instance_principal` (fallback)
+  - `OPENCLAW_OCI_CLI_AUTH_MODE=explicit`
 - In the current verified cluster state:
-  - `oci` wrapper exists at `/home/node/.openclaw/bin/oci`
-  - `/home/node/.openclaw/bin/oci os ns get` succeeds
-  - `/home/node/.openclaw/bin/oci os bucket list --compartment-id <OCI_COMPARTMENT_OCID>` succeeds
-  - test bucket creation via instance principal also succeeded
+  - `OCI_CLI_AUTH=oke_workload_identity` is injected into the openclaw containers
+  - `/home/node/.openclaw/bin/oci os ns get --debug` shows `auth: oke_workload_identity`
+  - OpenClaw agent OCI CLI calls using OKE workload identity succeeded, including Object Storage bucket creation
 - Note: an interactive `kubectl exec ... sh -lc` shell may reset `PATH` and resolve `oci` to `/usr/local/bin/oci` instead of the wrapper. In that case either:
   - run `/home/node/.openclaw/bin/oci ...`, or
-  - explicitly add `--auth instance_principal`
+  - explicitly add `--auth oke_workload_identity`
 
-## 5. Documentation
+## 5. Optional kubeconfig mount for agent-driven kubectl
 
-## 4. Documentation
+- `scripts/oci/gateway.env` also supports mounting a kubeconfig into the openclaw pod:
+  - `OPENCLAW_MOUNT_KUBECONFIG=1`
+  - `OPENCLAW_KUBECONFIG_FILE=/path/to/kubeconfig`
+  - `OPENCLAW_KUBECONFIG_SECRET_NAME=openclaw-kubeconfig`
+- When enabled, the deployment script creates a Secret and mounts it to `/home/node/.kube/config` with `KUBECONFIG=/home/node/.kube/config`.
+- This is optional and is intended for agent-driven `kubectl` workflows. It is not required for OpenClaw OCI access to Object Storage via `oke_workload_identity`.
+- If you do not need pod-local `kubectl`, set `OPENCLAW_MOUNT_KUBECONFIG=0`.
+- Best practice: use a dedicated least-privilege kubeconfig instead of a personal admin kubeconfig.
+
+## 6. Documentation
 - Troubleshooting: `docs/troubleshooting.md`
 - IAM / Workload Identity: `docs/iam-workload-identity.md`
 - Go-Live checklist: `docs/go-live-checklist.md`
 - Local Docker: `docs/local-docker.md` (detailed steps in `local-docker/README.md`)
 - Archive (historical records/planning drafts): `docs/archive/`
 
-## 5. Related Files
+## 7. Related Files
 - `scripts/oci/gateway.env.example` / `scripts/oci/gateway.env`
 - `config.json.template` / `config.json`
 - `k8s/` (Kubernetes manifests)

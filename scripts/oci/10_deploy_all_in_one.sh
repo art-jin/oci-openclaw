@@ -104,12 +104,14 @@ fi
 
 ALL_START_TS="$(now_ts)"
 
-echo "[PLAN] All-in-one deployment (${TOTAL_STEPS} steps)"
-echo "[PLAN] Workload identity policy default mode: all (gateway GenAI + OpenClaw Object Storage)"
-
 set -a
 source "$ENV_FILE"
 set +a
+
+echo "[PLAN] All-in-one deployment (${TOTAL_STEPS} steps)"
+echo "[PLAN] OpenClaw OCI CLI auth default: ${OPENCLAW_OCI_CLI_AUTH_MODE:-oke_workload_identity}"
+echo "[PLAN] Workload identity policy default mode: all (gateway GenAI + OpenClaw Object Storage)"
+echo "[PLAN] Instance principal Dynamic Group/policy steps are fallback-only"
 
 step_begin 1 "Ensure OKE cluster is available"
 if [[ "$CREATE_CLUSTER_IF_MISSING" -eq 0 ]]; then
@@ -148,19 +150,19 @@ else
 fi
 step_ok
 
-step_begin 4 "(Optional) Create Dynamic Group for openclaw instance principal"
+step_begin 4 "(Optional, fallback) Create Dynamic Group for openclaw instance principal"
 if [[ "$CREATE_INSTANCE_PRINCIPAL_DYNAMIC_GROUP" -eq 1 ]]; then
   bash scripts/oci/12a_openclaw_instance_principal_dynamic_group.sh create-or-update --env "$ENV_FILE"
 else
-  echo "[STEP 4/${TOTAL_STEPS}] Skip instance principal Dynamic Group (--create-instance-principal-dynamic-group not set)"
+  echo "[STEP 4/${TOTAL_STEPS}] Skip instance principal Dynamic Group fallback (--create-instance-principal-dynamic-group not set)"
 fi
 step_ok
 
-step_begin 5 "(Optional) Apply IAM policy for openclaw instance principal"
+step_begin 5 "(Optional, fallback) Apply IAM policy for openclaw instance principal"
 if [[ "$APPLY_INSTANCE_PRINCIPAL_POLICY" -eq 1 ]]; then
   bash scripts/oci/12_openclaw_instance_principal_policy.sh create-or-update --env "$ENV_FILE"
 else
-  echo "[STEP 5/${TOTAL_STEPS}] Skip instance principal IAM policy (--apply-instance-principal-policy not set)"
+  echo "[STEP 5/${TOTAL_STEPS}] Skip instance principal IAM policy fallback (--apply-instance-principal-policy not set)"
 fi
 step_ok
 
