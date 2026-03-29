@@ -65,5 +65,65 @@ kubectl -n openclaw-prod rollout status statefulset/openclaw --timeout=300s
 ```
 3) 验证日志：
 ```bash
-kubectl -n openclaw-prod logs pod/openclaw-0 -c openclaw --tail=200
+kubectl -n openclaw-prod logs pod/openclaw-0 -c gateway --tail=200
+```
+
+## 6) `session_token was not provided`
+现象：
+```text
+ValueError: session_token was not provided
+```
+
+含义：
+- 这通常表示当前 OKE 集群里没有可用的 Pod Identity / Workload Identity 注入链路。
+- 仅设置 `OCI_RESOURCE_PRINCIPAL_VERSION` / `OCI_RESOURCE_PRINCIPAL_REGION` 不足以让 `oci --auth resource_principal` 生效。
+
+当前项目已验证的替代路径：
+- OpenClaw pod 内 OCI CLI 可通过 instance principal 工作。
+- 已验证成功的命令包括：
+```bash
+/home/node/.openclaw/bin/oci os ns get
+/home/node/.openclaw/bin/oci os bucket list --compartment-id <OCI_COMPARTMENT_OCID>
+```
+
+## 7) `oci os ns get` 默认走到 `/usr/local/bin/oci`，没有命中 wrapper
+现象：
+```text
+which oci
+/usr/local/bin/oci
+```
+或：
+```text
+ERROR: Could not find config file at /home/node/.oci/config
+```
+
+根因：
+- OpenClaw 的 OCI CLI wrapper 已创建在 `/home/node/.openclaw/bin/oci`，但某些 `kubectl exec ... sh -lc` 交互 shell 会重置 `PATH`。
+
+修复 / 绕过：
+```bash
+/home/node/.openclaw/bin/oci os ns get
+```
+或显式写：
+```bash
+oci os ns get --auth instance_principal
+```
+
+## 8) 无法创建 Dynamic Group（`NotAuthorizedOrNotFound`）
+现象：
+```text
+create_dynamic_group
+NotAuthorizedOrNotFound
+```
+
+含义：
+- 当前账号没有 IAM 权限创建或查看 Dynamic Group，或该 IAM 资源对当前账号不可见。
+- 这不会阻止 gateway / openclaw 的部署成功。
+- 这只会阻止你自己完成 instance principal 所需的 IAM 配置步骤。
+
+建议：
+- 让有权限的人执行：
+```bash
+bash scripts/oci/12a_openclaw_instance_principal_dynamic_group.sh create-or-update --env scripts/oci/gateway.env
+bash scripts/oci/12_openclaw_instance_principal_policy.sh create-or-update --env scripts/oci/gateway.env
 ```

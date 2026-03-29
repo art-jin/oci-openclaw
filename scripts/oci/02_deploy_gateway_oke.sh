@@ -64,7 +64,13 @@ OPENCLAW_MANIFEST_DIR="${OPENCLAW_MANIFEST_DIR:-k8s/openclaw}"
 OPENCLAW_IMAGE="${OPENCLAW_IMAGE:-}"
 OPENCLAW_GATEWAY_BASE_URL="${OPENCLAW_GATEWAY_BASE_URL:-http://oci-anthropic-gateway.${K8S_GATEWAY_NAMESPACE}.svc.cluster.local:8000}"
 OPENCLAW_GATEWAY_API_KEY="${OPENCLAW_GATEWAY_API_KEY:-any-value-works}"
+OPENCLAW_OCI_CLI_AUTH_MODE="${OPENCLAW_OCI_CLI_AUTH_MODE:-instance_principal}"
 KUBECONFIG_PATH="${KUBECONFIG_PATH:-$HOME/.kube/config}"
+
+if [[ "$OPENCLAW_OCI_CLI_AUTH_MODE" != "instance_principal" && "$OPENCLAW_OCI_CLI_AUTH_MODE" != "explicit" ]]; then
+  echo "[ERROR] OPENCLAW_OCI_CLI_AUTH_MODE must be instance_principal or explicit" >&2
+  exit 1
+fi
 
 GATEWAY_IMAGE_MODE="${GATEWAY_IMAGE_MODE:-prebuilt}"
 CREATE_OCIR_PULL_SECRET="${CREATE_OCIR_PULL_SECRET:-1}"
@@ -272,13 +278,14 @@ render_manifest() {
   local out="$2"
 
   # Escape replacement strings for sed (at least '&' which otherwise expands to the matched text).
-  local image_esc oc_app_image_esc rp_region_esc openclaw_image_esc openclaw_base_url_esc openclaw_api_key_esc
+  local image_esc oc_app_image_esc rp_region_esc openclaw_image_esc openclaw_base_url_esc openclaw_api_key_esc openclaw_oci_cli_auth_mode_esc
   image_esc="${IMAGE_FULL//&/\\&}"
   oc_app_image_esc="${OC_APP_IMAGE//&/\\&}"
   rp_region_esc="${OCI_RESOURCE_PRINCIPAL_REGION//&/\\&}"
   openclaw_image_esc="${OPENCLAW_IMAGE//&/\\&}"
   openclaw_base_url_esc="${OPENCLAW_GATEWAY_BASE_URL//&/\\&}"
   openclaw_api_key_esc="${OPENCLAW_GATEWAY_API_KEY//&/\\&}"
+  openclaw_oci_cli_auth_mode_esc="${OPENCLAW_OCI_CLI_AUTH_MODE//&/\\&}"
 
   sed \
     -e "s#namespace: gateway-prod#namespace: ${K8S_GATEWAY_NAMESPACE}#g" \
@@ -292,6 +299,7 @@ render_manifest() {
     -e "s#__OPENCLAW_IMAGE__#${openclaw_image_esc//\//\\/}#g" \
     -e "s#__OPENCLAW_GATEWAY_BASE_URL__#${openclaw_base_url_esc//\//\\/}#g" \
     -e "s#__OPENCLAW_GATEWAY_API_KEY__#${openclaw_api_key_esc//\//\\/}#g" \
+    -e "s#__OPENCLAW_OCI_CLI_AUTH_MODE__#${openclaw_oci_cli_auth_mode_esc//\//\\/}#g" \
     -e "s#__OPENCLAW_PUBLIC_EXPOSE__#0#g" \
     "$src" > "$out"
 }
@@ -350,6 +358,7 @@ deploy_openclaw_if_requested() {
   ensure_file_exists "$np_egress_manifest"
 
   echo "[INFO] Deploying openclaw manifests from: $OPENCLAW_MANIFEST_DIR"
+  echo "[INFO] OpenClaw OCI CLI auth mode: $OPENCLAW_OCI_CLI_AUTH_MODE"
 
   local tmp_dir
   tmp_dir="$(mktemp -d)"

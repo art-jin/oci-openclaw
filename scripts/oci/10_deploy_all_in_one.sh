@@ -5,8 +5,10 @@ ENV_FILE="scripts/oci/gateway.env"
 APPLY=0
 CREATE_CLUSTER_IF_MISSING=1
 APPLY_IAM_POLICY=0
+APPLY_INSTANCE_PRINCIPAL_POLICY=0
+CREATE_INSTANCE_PRINCIPAL_DYNAMIC_GROUP=0
 
-TOTAL_STEPS=5
+TOTAL_STEPS=7
 CURRENT_STEP=0
 CURRENT_LABEL=""
 STEP_START_TS=0
@@ -75,11 +77,21 @@ while [[ $# -gt 0 ]]; do
       APPLY_IAM_POLICY=1
       shift
       ;;
+    --apply-instance-principal-policy)
+      APPLY_INSTANCE_PRINCIPAL_POLICY=1
+      shift
+      ;;
+    --create-instance-principal-dynamic-group)
+      CREATE_INSTANCE_PRINCIPAL_DYNAMIC_GROUP=1
+      shift
+      ;;
     *)
       echo "[ERROR] Unknown argument: $1" >&2
-      echo "Usage: $0 [--env path/to/gateway.env] [--apply] [--skip-create-cluster] [--apply-iam-policy]" >&2
+      echo "Usage: $0 [--env path/to/gateway.env] [--apply] [--skip-create-cluster] [--apply-iam-policy] [--create-instance-principal-dynamic-group] [--apply-instance-principal-policy]" >&2
       echo "Note: This runs scripts/oci/02_deploy_gateway_oke.sh with --deploy-openclaw" >&2
-      echo "Note: --apply-iam-policy runs scripts/oci/11_workload_identity_policy.sh create-or-update" >&2
+      echo "Note: --apply-iam-policy runs scripts/oci/11_workload_identity_policy.sh create-or-update (default mode: all)" >&2
+      echo "Note: --create-instance-principal-dynamic-group runs scripts/oci/12a_openclaw_instance_principal_dynamic_group.sh create-or-update" >&2
+      echo "Note: --apply-instance-principal-policy runs scripts/oci/12_openclaw_instance_principal_policy.sh create-or-update" >&2
       exit 1
       ;;
   esac
@@ -93,6 +105,7 @@ fi
 ALL_START_TS="$(now_ts)"
 
 echo "[PLAN] All-in-one deployment (${TOTAL_STEPS} steps)"
+echo "[PLAN] Workload identity policy default mode: all (gateway GenAI + OpenClaw Object Storage)"
 
 set -a
 source "$ENV_FILE"
@@ -100,11 +113,11 @@ set +a
 
 step_begin 1 "Ensure OKE cluster is available"
 if [[ "$CREATE_CLUSTER_IF_MISSING" -eq 0 ]]; then
-  echo "[STEP 1/4] Skip cluster bootstrap (--skip-create-cluster)"
+  echo "[STEP 1/7] Skip cluster bootstrap (--skip-create-cluster)"
   step_ok
 else
   if [[ -z "${OCI_CLUSTER_OCID:-}" || "${OCI_CLUSTER_OCID:-}" == *"REPLACE_ME"* ]]; then
-    echo "[STEP 1/4] OCI_CLUSTER_OCID not set. Running: scripts/oci/00_create_oke_cluster.sh"
+    echo "[STEP 1/7] OCI_CLUSTER_OCID not set. Running: scripts/oci/00_create_oke_cluster.sh"
     if [[ "$APPLY" -eq 1 ]]; then
       bash scripts/oci/00_create_oke_cluster.sh --env "$ENV_FILE" --apply
     else
@@ -112,7 +125,7 @@ else
     fi
 
     step_ok
-    echo "[DONE] Stopped after step 1/4. After cluster is created, update OCI_CLUSTER_OCID in $ENV_FILE and rerun this command."
+    echo "[DONE] Stopped after step 1/7. After cluster is created, update OCI_CLUSTER_OCID in $ENV_FILE and rerun this command."
     echo "[DONE] Total elapsed: $(fmt_elapsed $(( $(now_ts) - ALL_START_TS )))"
     exit 0
   fi
@@ -135,7 +148,23 @@ else
 fi
 step_ok
 
-step_begin 4 "Deploy gateway (+ openclaw)"
+step_begin 4 "(Optional) Create Dynamic Group for openclaw instance principal"
+if [[ "$CREATE_INSTANCE_PRINCIPAL_DYNAMIC_GROUP" -eq 1 ]]; then
+  bash scripts/oci/12a_openclaw_instance_principal_dynamic_group.sh create-or-update --env "$ENV_FILE"
+else
+  echo "[STEP 4/${TOTAL_STEPS}] Skip instance principal Dynamic Group (--create-instance-principal-dynamic-group not set)"
+fi
+step_ok
+
+step_begin 5 "(Optional) Apply IAM policy for openclaw instance principal"
+if [[ "$APPLY_INSTANCE_PRINCIPAL_POLICY" -eq 1 ]]; then
+  bash scripts/oci/12_openclaw_instance_principal_policy.sh create-or-update --env "$ENV_FILE"
+else
+  echo "[STEP 5/${TOTAL_STEPS}] Skip instance principal IAM policy (--apply-instance-principal-policy not set)"
+fi
+step_ok
+
+step_begin 6 "Deploy gateway (+ openclaw)"
 if [[ "$APPLY" -eq 1 ]]; then
   bash scripts/oci/02_deploy_gateway_oke.sh --env "$ENV_FILE" --deploy-openclaw --apply
 else
@@ -143,7 +172,7 @@ else
 fi
 step_ok
 
-step_begin 5 "Verify"
+step_begin 7 "Verify"
 bash scripts/oci/03_verify_gateway.sh "$ENV_FILE"
 step_ok
 

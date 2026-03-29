@@ -46,18 +46,27 @@ bash scripts/oci/11_workload_identity_policy.sh create-or-update \
   --service-account oci-gateway-sa
 ```
 
-## 5. 两种 mode
-脚本支持两种 policy 模式（`--mode`）：
+## 5. Policy mode
+脚本支持三种 policy 模式（`--mode`）：
 
-### 5.1 `gateway-genai`（默认）
-用于 gateway 调用 OCI Generative AI：
-- inspect generative-ai-model
-- use generative-ai-chat
+### 5.1 `all`（默认）
+一次性创建/更新两组 statement：
+- gateway 调用 OCI Generative AI：
+  - inspect generative-ai-model
+  - use generative-ai-chat
+- OpenClaw workload identity Object Storage：
+  - manage buckets
+  - manage objects
 
-### 5.2 `openclaw-objectstorage`
-用于 OpenClaw 访问 Object Storage（仅 buckets + objects）：
-- manage buckets
-- manage objects
+默认会使用两组主体：
+- `gateway-prod` / `oci-gateway-sa`
+- `openclaw-prod` / `openclaw-sa`
+
+### 5.2 `gateway-genai`
+仅用于 gateway 调用 OCI Generative AI。
+
+### 5.3 `openclaw-objectstorage`
+仅用于 OpenClaw workload identity 访问 Object Storage（buckets + objects）。
 
 示例：
 ```bash
@@ -67,6 +76,24 @@ bash scripts/oci/11_workload_identity_policy.sh create-or-update \
   --namespace openclaw-prod \
   --service-account openclaw-sa
 ```
+
+## 6. 与 instance principal 的关系
+
+需要区分两条路径：
+
+- workload identity policy（本文件）
+  - 适用于 gateway
+  - 也适用于未来重新尝试 OpenClaw 的 workload identity / resource principal 路线
+- instance principal policy（单独脚本）
+  - 适用于当前已验证的 OpenClaw pod 内 OCI CLI 路线
+  - 脚本：
+  ```bash
+  bash scripts/oci/12_openclaw_instance_principal_policy.sh create-or-update --env scripts/oci/gateway.env
+  ```
+
+如果没有 IAM 权限创建 Dynamic Group，也不影响部署本身；只会影响 OpenClaw 通过 instance principal 访问 OCI 资源的授权配置。
+
+## 7. 验证
 
 ## 6. 验证
 部署完成后，如果 gateway `/v1/messages` 返回 internal_error，通常需要查看日志确认是 IAM（401/403）还是模型/OCID 配置问题：

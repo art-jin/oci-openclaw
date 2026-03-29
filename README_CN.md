@@ -78,11 +78,16 @@ vi config.json
 # 仅部署（默认不修改 IAM）
 bash scripts/oci/10_deploy_all_in_one.sh --env scripts/oci/gateway.env --apply
 
-# 可选：同时创建/更新 Workload Identity 所需 IAM Policy（推荐首次部署执行一次）
+# 可选：同时创建/更新 Workload Identity 所需 IAM Policy
+# 默认 mode 为 all：同时覆盖 gateway GenAI + OpenClaw workload-identity Object Storage 授权
 bash scripts/oci/10_deploy_all_in_one.sh --env scripts/oci/gateway.env --apply --apply-iam-policy
 
 # 使用已有 OKE（跳过建集群）
 bash scripts/oci/10_deploy_all_in_one.sh --env scripts/oci/gateway.env --apply --skip-create-cluster
+
+# 如果你已经有现成的 worker nodes Dynamic Group，也可额外应用
+# OpenClaw 的 instance principal Object Storage policy
+bash scripts/oci/10_deploy_all_in_one.sh --env scripts/oci/gateway.env --apply --apply-instance-principal-policy
 ```
 
 ### 2.3 验证
@@ -122,14 +127,35 @@ bash scripts/oci/02_deploy_gateway_oke.sh --env scripts/oci/gateway.env --apply
 # openclaw 部署（可选）
 bash scripts/oci/02_deploy_gateway_oke.sh --env scripts/oci/gateway.env --deploy-openclaw --apply
 
-# IAM policy（Workload Identity）
+# IAM policy（Workload Identity，默认 mode=all）
 bash scripts/oci/11_workload_identity_policy.sh create-or-update --env scripts/oci/gateway.env
+
+# IAM policy（OpenClaw instance principal Object Storage；需要已有 Dynamic Group）
+bash scripts/oci/12_openclaw_instance_principal_policy.sh create-or-update --env scripts/oci/gateway.env
+
+# Dynamic Group 辅助脚本（适合快速实验；需要 IAM 权限；默认 matching rule 使用 OCI_COMPARTMENT_OCID）
+bash scripts/oci/12a_openclaw_instance_principal_dynamic_group.sh create-or-update --env scripts/oci/gateway.env
 
 # 清理 gateway（可选）
 bash scripts/oci/04_cleanup_gateway_oke.sh --env scripts/oci/gateway.env --apply
 ```
 
-## 4. 文档
+## 4. OpenClaw OCI CLI 认证说明
+
+- 现在需要区分两条 OCI 访问路径：
+  - gateway：OKE Workload Identity / OCI SDK 路线
+  - openclaw pod 内 OCI CLI：instance principal 路线（当前集群已验证）
+- `scripts/oci/gateway.env` 支持：
+  - `OPENCLAW_OCI_CLI_AUTH_MODE=instance_principal`
+- 当前已经验证成功：
+  - `/home/node/.openclaw/bin/oci os ns get`
+  - `/home/node/.openclaw/bin/oci os bucket list --compartment-id <OCI_COMPARTMENT_OCID>`
+  - 通过 instance principal 成功创建测试 bucket
+- 注意：某些 `kubectl exec ... sh -lc` 交互 shell 会重置 `PATH`，导致 `oci` 命中 `/usr/local/bin/oci` 而不是 wrapper。此时建议：
+  - 直接执行 `/home/node/.openclaw/bin/oci ...`
+  - 或显式加 `--auth instance_principal`
+
+## 5. 文档
 - 故障排查：`docs/troubleshooting.md`
 - IAM / Workload Identity：`docs/iam-workload-identity.md`
 - Go-Live checklist：`docs/go-live-checklist.md`

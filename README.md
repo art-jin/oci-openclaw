@@ -80,11 +80,16 @@ Required fields:
 # Deploy only (does not modify IAM by default)
 bash scripts/oci/10_deploy_all_in_one.sh --env scripts/oci/gateway.env --apply
 
-# Optional: Also create/update IAM Policy for Workload Identity (recommended for first deployment)
+# Optional: Also create/update IAM Policy for Workload Identity
+# Default mode is "all": gateway GenAI + OpenClaw workload-identity Object Storage policy
 bash scripts/oci/10_deploy_all_in_one.sh --env scripts/oci/gateway.env --apply --apply-iam-policy
 
 # Use existing OKE (skip cluster creation)
 bash scripts/oci/10_deploy_all_in_one.sh --env scripts/oci/gateway.env --apply --skip-create-cluster
+
+# If you already have an existing Dynamic Group for worker nodes, you can also apply
+# the separate instance principal Object Storage policy for OpenClaw
+bash scripts/oci/10_deploy_all_in_one.sh --env scripts/oci/gateway.env --apply --apply-instance-principal-policy
 ```
 
 ### 2.3 Verification
@@ -124,12 +129,36 @@ bash scripts/oci/02_deploy_gateway_oke.sh --env scripts/oci/gateway.env --apply
 # OpenClaw deployment (optional)
 bash scripts/oci/02_deploy_gateway_oke.sh --env scripts/oci/gateway.env --deploy-openclaw --apply
 
-# IAM policy (Workload Identity)
+# IAM policy (Workload Identity, default mode: all)
 bash scripts/oci/11_workload_identity_policy.sh create-or-update --env scripts/oci/gateway.env
+
+# IAM policy (OpenClaw instance principal Object Storage; requires an existing Dynamic Group)
+bash scripts/oci/12_openclaw_instance_principal_policy.sh create-or-update --env scripts/oci/gateway.env
+
+# Dynamic Group helper for quick experiments (requires IAM permission; default matching rule uses OCI_COMPARTMENT_OCID)
+bash scripts/oci/12a_openclaw_instance_principal_dynamic_group.sh create-or-update --env scripts/oci/gateway.env
 
 # Cleanup gateway (optional)
 bash scripts/oci/04_cleanup_gateway_oke.sh --env scripts/oci/gateway.env --apply
 ```
+
+## 4. OpenClaw OCI CLI authentication notes
+
+- Gateway and OpenClaw are now documented as two separate OCI access paths:
+  - gateway: OKE Workload Identity / OCI SDK path
+  - openclaw pod OCI CLI: instance principal path for current cluster experiments
+- `scripts/oci/gateway.env` supports:
+  - `OPENCLAW_OCI_CLI_AUTH_MODE=instance_principal`
+- In the current verified cluster state:
+  - `oci` wrapper exists at `/home/node/.openclaw/bin/oci`
+  - `/home/node/.openclaw/bin/oci os ns get` succeeds
+  - `/home/node/.openclaw/bin/oci os bucket list --compartment-id <OCI_COMPARTMENT_OCID>` succeeds
+  - test bucket creation via instance principal also succeeded
+- Note: an interactive `kubectl exec ... sh -lc` shell may reset `PATH` and resolve `oci` to `/usr/local/bin/oci` instead of the wrapper. In that case either:
+  - run `/home/node/.openclaw/bin/oci ...`, or
+  - explicitly add `--auth instance_principal`
+
+## 5. Documentation
 
 ## 4. Documentation
 - Troubleshooting: `docs/troubleshooting.md`

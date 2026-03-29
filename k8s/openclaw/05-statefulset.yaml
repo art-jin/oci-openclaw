@@ -107,10 +107,14 @@ spec:
           env:
             - name: HOME
               value: /home/node
+            - name: PATH
+              value: /home/node/.openclaw/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
             - name: OCI_RESOURCE_PRINCIPAL_VERSION
               value: "2.2"
             - name: OCI_RESOURCE_PRINCIPAL_REGION
               value: "us-chicago-1"
+            - name: OPENCLAW_OCI_CLI_AUTH_MODE
+              value: "__OPENCLAW_OCI_CLI_AUTH_MODE__"
           ports:
             - name: gateway
               containerPort: 18789
@@ -155,6 +159,48 @@ spec:
           volumeMounts:
             - name: openclaw-data
               mountPath: /home/node/.openclaw
+          lifecycle:
+            postStart:
+              exec:
+                command:
+                  - sh
+                  - -lc
+                  - |
+                    set -eu
+                    BIN_DIR=/home/node/.openclaw/bin
+                    REAL_OCI=""
+                    for candidate in /usr/bin/oci /usr/local/bin/oci; do
+                      if [ -x "$candidate" ]; then
+                        REAL_OCI="$candidate"
+                        break
+                      fi
+                    done
+                    if [ -z "$REAL_OCI" ]; then
+                      exit 0
+                    fi
+                    mkdir -p "$BIN_DIR"
+                    cat > "$BIN_DIR/oci" <<'EOF'
+                    #!/bin/sh
+                    set -eu
+                    REAL_OCI="__OPENCLAW_OCI_REAL_BIN__"
+                    AUTH_MODE="${OPENCLAW_OCI_CLI_AUTH_MODE:-instance_principal}"
+                    if [ "$AUTH_MODE" != "instance_principal" ]; then
+                      exec "$REAL_OCI" "$@"
+                    fi
+                    prev_was_auth=0
+                    for arg in "$@"; do
+                      if [ "$prev_was_auth" -eq 1 ]; then
+                        exec "$REAL_OCI" "$@"
+                      fi
+                      if [ "$arg" = "--auth" ]; then
+                        prev_was_auth=1
+                      fi
+                    done
+                    exec "$REAL_OCI" "$@" --auth instance_principal
+                    EOF
+                    sed -i "s#__OPENCLAW_OCI_REAL_BIN__#$REAL_OCI#g" "$BIN_DIR/oci"
+                    chmod 755 "$BIN_DIR/oci"
+                    chown 1000:1000 "$BIN_DIR/oci"
 
         - name: cli
           image: __OPENCLAW_IMAGE__
@@ -168,10 +214,14 @@ spec:
           env:
             - name: HOME
               value: /home/node
+            - name: PATH
+              value: /home/node/.openclaw/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
             - name: OCI_RESOURCE_PRINCIPAL_VERSION
               value: "2.2"
             - name: OCI_RESOURCE_PRINCIPAL_REGION
               value: "us-chicago-1"
+            - name: OPENCLAW_OCI_CLI_AUTH_MODE
+              value: "__OPENCLAW_OCI_CLI_AUTH_MODE__"
           securityContext:
             runAsNonRoot: true
             runAsUser: 1000
@@ -190,6 +240,48 @@ spec:
           volumeMounts:
             - name: openclaw-data
               mountPath: /home/node/.openclaw
+          lifecycle:
+            postStart:
+              exec:
+                command:
+                  - sh
+                  - -lc
+                  - |
+                    set -eu
+                    BIN_DIR=/home/node/.openclaw/bin
+                    REAL_OCI=""
+                    for candidate in /usr/bin/oci /usr/local/bin/oci; do
+                      if [ -x "$candidate" ]; then
+                        REAL_OCI="$candidate"
+                        break
+                      fi
+                    done
+                    if [ -z "$REAL_OCI" ]; then
+                      exit 0
+                    fi
+                    mkdir -p "$BIN_DIR"
+                    cat > "$BIN_DIR/oci" <<'EOF'
+                    #!/bin/sh
+                    set -eu
+                    REAL_OCI="__OPENCLAW_OCI_REAL_BIN__"
+                    AUTH_MODE="${OPENCLAW_OCI_CLI_AUTH_MODE:-instance_principal}"
+                    if [ "$AUTH_MODE" != "instance_principal" ]; then
+                      exec "$REAL_OCI" "$@"
+                    fi
+                    prev_was_auth=0
+                    for arg in "$@"; do
+                      if [ "$prev_was_auth" -eq 1 ]; then
+                        exec "$REAL_OCI" "$@"
+                      fi
+                      if [ "$arg" = "--auth" ]; then
+                        prev_was_auth=1
+                      fi
+                    done
+                    exec "$REAL_OCI" "$@" --auth instance_principal
+                    EOF
+                    sed -i "s#__OPENCLAW_OCI_REAL_BIN__#$REAL_OCI#g" "$BIN_DIR/oci"
+                    chmod 755 "$BIN_DIR/oci"
+                    chown 1000:1000 "$BIN_DIR/oci"
 
       volumes:
         - name: openclaw-config-template
