@@ -164,8 +164,9 @@ bash scripts/oci/04_cleanup_gateway_oke.sh --env scripts/oci/gateway.env --apply
   - `OPENCLAW_MOUNT_KUBECONFIG=1`
   - `OPENCLAW_KUBECONFIG_FILE=/path/to/kubeconfig`
   - `OPENCLAW_KUBECONFIG_SECRET_NAME=openclaw-kubeconfig`
-- 启用后，部署脚本会创建 Secret，并将其挂载到 `/home/node/.kube/config`，同时设置 `KUBECONFIG=/home/node/.kube/config`。
-- 这是一个可选增强能力，主要用于 agent 在 pod 内执行 `kubectl`。它不是 OpenClaw 通过 `oke_workload_identity` 访问 OCI Object Storage 的必要条件。
+- 启用后，部署脚本会创建并填充 Secret，pod 内通过 `/home/node/.kube/config` 暴露，并设置 `KUBECONFIG=/home/node/.kube/config`。
+- 这是一个可选增强能力，可作为 agent 在 pod 内执行 `kubectl` 的辅助前提；它不是 OpenClaw 通过 `oke_workload_identity` 访问 OCI Object Storage 的必要条件。
+- 挂载进去的 kubeconfig 必须是**在 pod 运行时内部也可直接使用**的 kubeconfig。宿主机生成的 kubeconfig 可能仍依赖外部凭据或 exec 登录流程，未必能在容器内直接使用。
 - 如果不需要 pod 内 `kubectl`，可以设为 `OPENCLAW_MOUNT_KUBECONFIG=0`。
 - 最佳实践：使用最小权限、专用的 kubeconfig，而不是个人 admin kubeconfig。
 

@@ -166,8 +166,9 @@ bash scripts/oci/04_cleanup_gateway_oke.sh --env scripts/oci/gateway.env --apply
   - `OPENCLAW_MOUNT_KUBECONFIG=1`
   - `OPENCLAW_KUBECONFIG_FILE=/path/to/kubeconfig`
   - `OPENCLAW_KUBECONFIG_SECRET_NAME=openclaw-kubeconfig`
-- When enabled, the deployment script creates a Secret and mounts it to `/home/node/.kube/config` with `KUBECONFIG=/home/node/.kube/config`.
-- This is optional and is intended for agent-driven `kubectl` workflows. It is not required for OpenClaw OCI access to Object Storage via `oke_workload_identity`.
+- When enabled, the deployment script creates and populates a Secret that is exposed in the pod at `/home/node/.kube/config` with `KUBECONFIG=/home/node/.kube/config`.
+- This is optional and is intended as a supporting capability for agent-driven `kubectl` workflows. It is not required for OpenClaw OCI access to Object Storage via `oke_workload_identity`.
+- The mounted kubeconfig must be valid for use from inside the pod runtime. A host-generated kubeconfig may still depend on external credentials or exec-based login flows and may not be directly usable inside the container.
 - If you do not need pod-local `kubectl`, set `OPENCLAW_MOUNT_KUBECONFIG=0`.
 - Best practice: use a dedicated least-privilege kubeconfig instead of a personal admin kubeconfig.
 
