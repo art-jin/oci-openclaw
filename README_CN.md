@@ -144,25 +144,39 @@ bash scripts/oci/04_cleanup_gateway_oke.sh --env scripts/oci/gateway.env --apply
 
 - 现在需要区分两条 OCI 访问路径：
   - gateway：OKE Workload Identity / OCI SDK 路线
-  - openclaw pod 内 OCI CLI：instance principal 路线（当前集群已验证）
+  - openclaw pod 内 OCI CLI：默认走 `oke_workload_identity`
 - `scripts/oci/gateway.env` 支持：
-  - `OPENCLAW_OCI_CLI_AUTH_MODE=instance_principal`
+  - `OPENCLAW_OCI_CLI_AUTH_MODE=oke_workload_identity`（默认）
+  - `OPENCLAW_OCI_CLI_AUTH_MODE=instance_principal`（fallback）
+  - `OPENCLAW_OCI_CLI_AUTH_MODE=explicit`
 - 当前已经验证成功：
-  - `/home/node/.openclaw/bin/oci os ns get`
-  - `/home/node/.openclaw/bin/oci os bucket list --compartment-id <OCI_COMPARTMENT_OCID>`
-  - 通过 instance principal 成功创建测试 bucket
+  - openclaw 容器内注入了 `OCI_CLI_AUTH=oke_workload_identity`
+  - `/home/node/.openclaw/bin/oci os ns get --debug` 会显示 `auth: oke_workload_identity`
+  - OpenClaw agent 通过 OKE workload identity 成功调用 OCI CLI，并成功创建 Object Storage bucket
+  - 已验证测试桶 `test-bucket-20260329-1119z` 的 `created-by=ocid1.workload...`，说明创建者是 OKE workload principal，而不是个人用户或 instance principal
 - 注意：某些 `kubectl exec ... sh -lc` 交互 shell 会重置 `PATH`，导致 `oci` 命中 `/usr/local/bin/oci` 而不是 wrapper。此时建议：
   - 直接执行 `/home/node/.openclaw/bin/oci ...`
-  - 或显式加 `--auth instance_principal`
+  - 或显式加 `--auth oke_workload_identity`
 
-## 5. 文档
+## 5. 可选：为 agent 驱动的 kubectl 挂载 kubeconfig
+
+- `scripts/oci/gateway.env` 也支持把 kubeconfig 挂载进 openclaw pod：
+  - `OPENCLAW_MOUNT_KUBECONFIG=1`
+  - `OPENCLAW_KUBECONFIG_FILE=/path/to/kubeconfig`
+  - `OPENCLAW_KUBECONFIG_SECRET_NAME=openclaw-kubeconfig`
+- 启用后，部署脚本会创建 Secret，并将其挂载到 `/home/node/.kube/config`，同时设置 `KUBECONFIG=/home/node/.kube/config`。
+- 这是一个可选增强能力，主要用于 agent 在 pod 内执行 `kubectl`。它不是 OpenClaw 通过 `oke_workload_identity` 访问 OCI Object Storage 的必要条件。
+- 如果不需要 pod 内 `kubectl`，可以设为 `OPENCLAW_MOUNT_KUBECONFIG=0`。
+- 最佳实践：使用最小权限、专用的 kubeconfig，而不是个人 admin kubeconfig。
+
+## 6. 文档
 - 故障排查：`docs/troubleshooting.md`
 - IAM / Workload Identity：`docs/iam-workload-identity.md`
 - Go-Live checklist：`docs/go-live-checklist.md`
 - Local Docker：`docs/local-docker.md`（详细步骤见 `local-docker/README.md`）
 - Archive（历史记录/计划草稿）：`docs/archive/`
 
-## 5. 相关文件
+## 7. 相关文件
 - `scripts/oci/gateway.env.example` / `scripts/oci/gateway.env`
 - `config.json.template` / `config.json`
 - `k8s/`（Kubernetes manifests）

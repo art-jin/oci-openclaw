@@ -155,6 +155,7 @@ bash scripts/oci/04_cleanup_gateway_oke.sh --env scripts/oci/gateway.env --apply
   - `OCI_CLI_AUTH=oke_workload_identity` is injected into the openclaw containers
   - `/home/node/.openclaw/bin/oci os ns get --debug` shows `auth: oke_workload_identity`
   - OpenClaw agent OCI CLI calls using OKE workload identity succeeded, including Object Storage bucket creation
+  - A verified test bucket (`test-bucket-20260329-1119z`) shows `created-by=ocid1.workload...`, confirming the creator is the OKE workload principal rather than a personal user or instance principal
 - Note: an interactive `kubectl exec ... sh -lc` shell may reset `PATH` and resolve `oci` to `/usr/local/bin/oci` instead of the wrapper. In that case either:
   - run `/home/node/.openclaw/bin/oci ...`, or
   - explicitly add `--auth oke_workload_identity`
