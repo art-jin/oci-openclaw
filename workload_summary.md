@@ -20,11 +20,11 @@ Agent 已成功创建测试 bucket：
 - `test-bucket-20260329-1119z`
 
 对应 bucket OCID：
-- `ocid1.bucket.oc1.us-chicago-1.aaaaaaaapbfcfrd5wlzfyj5x4nunih6ypze2xxjhizrmqntz3oqmsbcc4q4a`
+- `ocid1.bucket.oc1.us-chicago-1.aaaa...q4a`
 
 ### 3. 创建者身份验证通过
 查询 bucket 元数据结果显示：
-- `created-by = ocid1.workload.oc1.ord.c4bpwo4ouha.mdawmdrmmdrmy2q5owjinzrhmjy5nduymjvhyzzkmme3zmnm`
+- `created-by = ocid1.workload.oc1.ord.c4bp...zmnm`
 
 这说明该 bucket 的创建者是：
 - **OKE workload principal / workload identity**
