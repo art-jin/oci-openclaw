@@ -49,39 +49,28 @@ Agent 已成功创建测试 bucket：
 - 可选的 kubeconfig 挂载能力已保留，但它不是本次 bucket 创建成功的必要条件。
 - 本次核心成果是：**OpenClaw agent 在 pod 内通过 OKE workload identity 成功调用 OCI CLI 并创建 Object Storage bucket。**
 
-## 外部 ../openclaw 仓库需要单独提交的改动说明和清单
+## 外部 ../openclaw/Dockerfile 最终修改说明
 以下改动不在当前 deployment repo 中，而是在外部 OpenClaw 源仓库 `../openclaw`：
 
-### 变更文件
-- `../openclaw/Dockerfile`
+- 变更文件：`../openclaw/Dockerfile`
+- 当前最终状态：runtime image 已包含 `oci` CLI，并新增了 `kubectl`
+- 其中：
+  - `oci` CLI 是 OpenClaw pod 内执行 `oci ...` 的前提
+  - `kubectl` 是后续 pod 内 Kubernetes 运维能力增强
+- 这部分改动应在 `../openclaw` 仓库中单独审视和提交，不应混入当前 deployment repo 的正式交付边界
 
-### 已做改动
-在 runtime image 中新增了 `kubectl` 安装能力，具体包括：
-- 新增构建参数：
-  - `OPENCLAW_KUBECTL_VERSION="v1.35.0"`
-  - `OPENCLAW_KUBECTL_SHA256=""`
-- 在 OCI CLI 安装步骤中增加：
-  - 下载 `kubectl`
-  - 写入 `/usr/local/bin/kubectl`
-  - `chmod 0755 /usr/local/bin/kubectl`
+关于这部分外部 Dockerfile 改动的最终说明，包括：
+- 修改位置
+- `oci` CLI 的安装方式
+- `kubectl` 的新增方式
+- 与 deployment repo 的职责边界
+- 运行时调用链说明
 
-### 目的
-让 OpenClaw pod 内运行的 agent 具备直接执行 `kubectl` 的基础能力，配合已支持的 kubeconfig 挂载，可用于后续 agent 驱动的 Kubernetes 操作场景。
+请参考：
+- `openclaw_docker_upd.md`
 
-### 这部分改动的状态
-- 已在本地 `../openclaw/Dockerfile` 完成修改
-- 已通过新的 image tag 构建出包含 `kubectl` 的镜像
-- **但尚未在 `../openclaw` 对应 git 仓库中单独提交**
-
-### 建议在外部仓库单独提交时的说明
-建议提交说明可写为：
-- Add kubectl to OpenClaw runtime image
-
-建议提交内容应聚焦：
-- runtime image 现在同时包含 `oci` CLI 与 `kubectl`
-- 为 OKE pod 内 agent 场景补齐 K8s 命令执行基础能力
-- 不把 workload identity deployment repo 的改动混进这个提交
-
-### 建议交付边界
-- 当前 deployment repo：负责 OKE 部署、manifest、env、IAM、文档
-- `../openclaw` repo：负责 runtime image 内容（如 `kubectl`、`oci` CLI 等工具链）
+当前状态：
+- 已在本地 `../openclaw/Dockerfile` 完成 `kubectl` 相关修改，并确认当前最终状态包含 `oci` 与 `kubectl`
+- 已可构建出包含 `oci` 与 `kubectl` 的镜像
+- 若仅针对本次新增部分补做独立提交，建议 commit message：
+  - `Add kubectl to OpenClaw runtime image`

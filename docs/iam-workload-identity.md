@@ -82,16 +82,18 @@ bash scripts/oci/11_workload_identity_policy.sh create-or-update \
 需要区分两条路径：
 
 - workload identity policy（本文件）
+  - 是当前仓库的首选路径
   - 适用于 gateway
-  - 也适用于未来重新尝试 OpenClaw 的 workload identity / resource principal 路线
+  - 也适用于 OpenClaw pod 内 OCI CLI 的首选路线
 - instance principal policy（单独脚本）
-  - 适用于当前已验证的 OpenClaw pod 内 OCI CLI 路线
+  - 是 OpenClaw OCI CLI 的备选 / fallback 路线
+  - 适用于 OKE Workload Identity 不可用、未打通或需要临时绕行的场景
   - 脚本：
   ```bash
   bash scripts/oci/12_openclaw_instance_principal_policy.sh create-or-update --env scripts/oci/gateway.env
   ```
 
-如果没有 IAM 权限创建 Dynamic Group，也不影响部署本身；只会影响 OpenClaw 通过 instance principal 访问 OCI 资源的授权配置。
+如果没有 IAM 权限创建 Dynamic Group，也不影响部署本身；只会影响 OpenClaw 通过 instance principal 访问 OCI 资源的 fallback 授权配置。
 
 ## 7. 验证
 
